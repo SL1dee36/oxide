@@ -1,0 +1,31 @@
+[package]
+name = "oxide"
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "Nazaryan Artem <nazaryannnn36@gmail.com>",
+    "google gemini 3.8",
+]
+description = "Lightweight 2D/3D multimedia and simulation runtime engine"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/Sl1dee36/oxide"
+keywords = ["graphics", "opengl", "simulation", "engine", "ffi"]
+categories = ["rendering", "game-engines", "simulation"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+winit = "0.29"
+glutin = "0.31"
+glutin-winit = "0.4"
+raw-window-handle = "0.5"
+glow = "0.13"
+glam = "0.28"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+tobj = { version = "4.0", default-features = false }
+fontdue = "0.9"
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.11"

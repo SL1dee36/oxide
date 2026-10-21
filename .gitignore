@@ -1,0 +1,44 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+
+# Compiled Object and Library files
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.exe
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+
+# IDE / Editor artifacts
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.suo
+*.user
+*.userosv
+*.sln.docstates
+.vs/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+desktop.ini
