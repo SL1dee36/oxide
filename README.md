@@ -16,14 +16,14 @@ Oxide combines the memory safety and speed of native Rust with a universal C-ABI
 
 ```mermaid
 graph LR
-    subgraph Language Ecosystem
+    subgraph Ecosystem["Language Ecosystem"]
         RustApp[Rust Applications]
         PythonApp[Python Workspaces]
         CppApp[C / C++ Programs]
         CSharpApp[C# / Zig Runtimes]
     end
 
-    subgraph Oxide Runtime Core
+    subgraph Core["Oxide Runtime Core"]
         Facade["Unified Engine Facade<br/>(oxide::prelude & C-ABI)"]
         SceneGraph["Hierarchical Scene Graph<br/>(Parent-Child Transform Tree)"]
         CollisionEngine["Spatial Query & Collision Engine<br/>(AABB, Sphere, Raycasting)"]
@@ -31,7 +31,7 @@ graph LR
         RenderBackend["OpenGL 3.3 Core Render Pipeline<br/>(3D Lit + 2D Orthographic)"]
     end
 
-    Language Ecosystem --> Facade
+    Ecosystem --> Facade
     Facade --> SceneGraph
     Facade --> CollisionEngine
     Facade --> TextEngine
