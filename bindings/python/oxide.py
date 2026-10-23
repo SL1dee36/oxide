@@ -257,6 +257,70 @@ _dll.oxide_scene_update.restype = None
 _dll.oxide_scene_render.argtypes = [c_void_p, c_void_p]
 _dll.oxide_scene_render.restype = None
 
+# Physics Simulation
+_dll.oxide_scene_step_physics.argtypes = [c_void_p, c_float]
+_dll.oxide_scene_step_physics.restype = None
+
+_dll.oxide_scene_spawn_rigid_body_box.argtypes = [c_void_p, OxideVec3, OxideTransform, c_float, c_float, c_float, c_bool]
+_dll.oxide_scene_spawn_rigid_body_box.restype = c_uint64
+
+_dll.oxide_scene_spawn_rigid_body_sphere.argtypes = [c_void_p, c_float, OxideTransform, c_float, c_float, c_float, c_bool]
+_dll.oxide_scene_spawn_rigid_body_sphere.restype = c_uint64
+
+_dll.oxide_scene_add_rigid_body.argtypes = [c_void_p, c_uint64, c_float, c_float, c_float, c_uint32]
+_dll.oxide_scene_add_rigid_body.restype = c_bool
+
+_dll.oxide_scene_rigid_body_apply_force.argtypes = [c_void_p, c_uint64, OxideVec3]
+_dll.oxide_scene_rigid_body_apply_force.restype = None
+
+_dll.oxide_scene_rigid_body_apply_torque.argtypes = [c_void_p, c_uint64, OxideVec3]
+_dll.oxide_scene_rigid_body_apply_torque.restype = None
+
+_dll.oxide_scene_rigid_body_apply_impulse.argtypes = [c_void_p, c_uint64, OxideVec3]
+_dll.oxide_scene_rigid_body_apply_impulse.restype = None
+
+_dll.oxide_scene_rigid_body_set_velocity.argtypes = [c_void_p, c_uint64, OxideVec3]
+_dll.oxide_scene_rigid_body_set_velocity.restype = c_bool
+
+_dll.oxide_scene_rigid_body_get_velocity.argtypes = [c_void_p, c_uint64, POINTER(OxideVec3)]
+_dll.oxide_scene_rigid_body_get_velocity.restype = c_bool
+
+_dll.oxide_scene_rigid_body_set_angular_velocity.argtypes = [c_void_p, c_uint64, OxideVec3]
+_dll.oxide_scene_rigid_body_set_angular_velocity.restype = c_bool
+
+_dll.oxide_scene_rigid_body_get_angular_velocity.argtypes = [c_void_p, c_uint64, POINTER(OxideVec3)]
+_dll.oxide_scene_rigid_body_get_angular_velocity.restype = c_bool
+
+_dll.oxide_scene_rigid_body_get_mass.argtypes = [c_void_p, c_uint64, POINTER(c_float)]
+_dll.oxide_scene_rigid_body_get_mass.restype = c_bool
+
+_dll.oxide_scene_spawn_soft_body_cloth.argtypes = [c_void_p, c_float, c_float, c_uint32, c_uint32, c_float, c_float, OxideTransform]
+_dll.oxide_scene_spawn_soft_body_cloth.restype = c_uint64
+
+_dll.oxide_scene_node_add_soft_body_cloth.argtypes = [c_void_p, c_uint64, c_float, c_float, c_uint32, c_uint32, c_float, c_float]
+_dll.oxide_scene_node_add_soft_body_cloth.restype = c_bool
+
+_dll.oxide_scene_soft_body_set_particle_fixed.argtypes = [c_void_p, c_uint64, c_uint32, c_bool]
+_dll.oxide_scene_soft_body_set_particle_fixed.restype = c_bool
+
+_dll.oxide_scene_soft_body_get_particle_count.argtypes = [c_void_p, c_uint64, POINTER(c_uint32)]
+_dll.oxide_scene_soft_body_get_particle_count.restype = c_bool
+
+_dll.oxide_scene_soft_body_get_particle_position.argtypes = [c_void_p, c_uint64, c_uint32, POINTER(OxideVec3)]
+_dll.oxide_scene_soft_body_get_particle_position.restype = c_bool
+
+_dll.oxide_scene_soft_body_set_particle_position.argtypes = [c_void_p, c_uint64, c_uint32, OxideVec3]
+_dll.oxide_scene_soft_body_set_particle_position.restype = c_bool
+
+_dll.oxide_scene_soft_body_add_constraint.argtypes = [c_void_p, c_uint64, c_uint32, c_uint32, c_float, c_float]
+_dll.oxide_scene_soft_body_add_constraint.restype = c_bool
+
+_dll.oxide_scene_soft_body_set_compliance.argtypes = [c_void_p, c_uint64, c_float]
+_dll.oxide_scene_soft_body_set_compliance.restype = c_bool
+
+_dll.oxide_scene_soft_body_set_substeps.argtypes = [c_void_p, c_uint64, c_uint32]
+_dll.oxide_scene_soft_body_set_substeps.restype = c_bool
+
 
 # ==========================================
 # Pythonic Object Wrappers
@@ -667,6 +731,92 @@ class Scene:
 
     def render(self, ctx):
         _dll.oxide_scene_render(self._ptr, ctx._ptr)
+
+    def step_physics(self, dt: float):
+        """Advances rigid body and soft body physics simulation by dt seconds."""
+        _dll.oxide_scene_step_physics(self._ptr, float(dt))
+
+    def spawn_rigid_body_box(self, size: Vec3, transform: Transform = None, mass: float = 1.0, restitution: float = 0.2, friction: float = 0.5, is_static: bool = False) -> int:
+        tf = transform._to_c() if transform else Transform()._to_c()
+        return _dll.oxide_scene_spawn_rigid_body_box(self._ptr, size._to_c(), tf, float(mass), float(restitution), float(friction), bool(is_static))
+
+    def spawn_rigid_body_sphere(self, radius: float, transform: Transform = None, mass: float = 1.0, restitution: float = 0.2, friction: float = 0.5, is_static: bool = False) -> int:
+        tf = transform._to_c() if transform else Transform()._to_c()
+        return _dll.oxide_scene_spawn_rigid_body_sphere(self._ptr, float(radius), tf, float(mass), float(restitution), float(friction), bool(is_static))
+
+    def add_rigid_body(self, node_id: int, mass: float = 1.0, restitution: float = 0.2, friction: float = 0.5, body_type: int = 0) -> bool:
+        return _dll.oxide_scene_add_rigid_body(self._ptr, int(node_id), float(mass), float(restitution), float(friction), int(body_type))
+
+    def apply_force(self, node_id: int, force: Vec3):
+        _dll.oxide_scene_rigid_body_apply_force(self._ptr, int(node_id), force._to_c())
+
+    def apply_torque(self, node_id: int, torque: Vec3):
+        _dll.oxide_scene_rigid_body_apply_torque(self._ptr, int(node_id), torque._to_c())
+
+    def apply_impulse(self, node_id: int, impulse: Vec3):
+        _dll.oxide_scene_rigid_body_apply_impulse(self._ptr, int(node_id), impulse._to_c())
+
+    def set_velocity(self, node_id: int, velocity: Vec3) -> bool:
+        return _dll.oxide_scene_rigid_body_set_velocity(self._ptr, int(node_id), velocity._to_c())
+
+    def get_velocity(self, node_id: int) -> Vec3:
+        out = OxideVec3()
+        if _dll.oxide_scene_rigid_body_get_velocity(self._ptr, int(node_id), byref(out)):
+            return Vec3._from_c(out)
+        return Vec3()
+
+    def set_angular_velocity(self, node_id: int, ang_vel: Vec3) -> bool:
+        return _dll.oxide_scene_rigid_body_set_angular_velocity(self._ptr, int(node_id), ang_vel._to_c())
+
+    def get_angular_velocity(self, node_id: int) -> Vec3:
+        out = OxideVec3()
+        if _dll.oxide_scene_rigid_body_get_angular_velocity(self._ptr, int(node_id), byref(out)):
+            return Vec3._from_c(out)
+        return Vec3()
+
+    def get_mass(self, node_id: int) -> float:
+        out = c_float()
+        if _dll.oxide_scene_rigid_body_get_mass(self._ptr, int(node_id), byref(out)):
+            return out.value
+        return 0.0
+
+    def spawn_soft_body_cloth(self, width: float, height: float, segments_x: int, segments_y: int, total_mass: float, stiffness: float, transform: Transform = None) -> int:
+        tf = transform._to_c() if transform else Transform()._to_c()
+        return _dll.oxide_scene_spawn_soft_body_cloth(self._ptr, float(width), float(height), int(segments_x), int(segments_y), float(total_mass), float(stiffness), tf)
+
+    def set_particle_fixed(self, node_id: int, particle_idx: int, fixed: bool) -> bool:
+        """Marks or unmarks a soft body particle as pinned/immovable."""
+        return _dll.oxide_scene_soft_body_set_particle_fixed(self._ptr, int(node_id), int(particle_idx), bool(fixed))
+
+    def get_particle_count(self, node_id: int) -> int:
+        """Retrieves total particle count in a soft body node."""
+        out = c_uint32()
+        if _dll.oxide_scene_soft_body_get_particle_count(self._ptr, int(node_id), byref(out)):
+            return out.value
+        return 0
+
+    def get_particle_position(self, node_id: int, particle_idx: int) -> Vec3:
+        """Retrieves world position of a soft body particle."""
+        out = OxideVec3()
+        if _dll.oxide_scene_soft_body_get_particle_position(self._ptr, int(node_id), int(particle_idx), byref(out)):
+            return Vec3._from_c(out)
+        return Vec3()
+
+    def set_particle_position(self, node_id: int, particle_idx: int, pos: Vec3) -> bool:
+        """Sets world position of a soft body particle."""
+        return _dll.oxide_scene_soft_body_set_particle_position(self._ptr, int(node_id), int(particle_idx), pos._to_c())
+
+    def add_soft_body_constraint(self, node_id: int, particle_a: int, particle_b: int, rest_length: float, stiffness: float) -> bool:
+        """Adds a bilateral distance constraint between two particles in a soft body."""
+        return _dll.oxide_scene_soft_body_add_constraint(self._ptr, int(node_id), int(particle_a), int(particle_b), float(rest_length), float(stiffness))
+
+    def set_compliance(self, node_id: int, compliance: float) -> bool:
+        """Sets XPBD compliance parameter (0.0 = completely rigid, > 0.0 = elastic)."""
+        return _dll.oxide_scene_soft_body_set_compliance(self._ptr, int(node_id), float(compliance))
+
+    def set_substeps(self, node_id: int, substeps: int) -> bool:
+        """Sets number of PBD solver sub-steps per physics step (e.g., 4 to 8)."""
+        return _dll.oxide_scene_soft_body_set_substeps(self._ptr, int(node_id), int(substeps))
 
 
 class App:

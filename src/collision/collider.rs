@@ -156,6 +156,10 @@ impl Aabb3D {
 
     /// Performs slab-method ray intersection against this AABB.
     pub fn raycast(&self, ray: &Ray3D) -> Option<RaycastHit> {
+        if !ray.origin.is_finite() || !ray.direction.is_finite() || ray.direction.length_squared() < 1e-12 {
+            return None;
+        }
+
         let mut tmin = f32::NEG_INFINITY;
         let mut tmax = f32::INFINITY;
         let mut normal = Vec3::ZERO;
@@ -173,6 +177,9 @@ impl Aabb3D {
             if t0 > t1 {
                 std::mem::swap(&mut t0, &mut t1);
                 n = Vec3::new(1.0, 0.0, 0.0);
+            }
+            if t0.is_nan() || t1.is_nan() {
+                return None;
             }
             if t0 > tmin {
                 tmin = t0;
@@ -200,6 +207,9 @@ impl Aabb3D {
                 std::mem::swap(&mut t0, &mut t1);
                 n = Vec3::new(0.0, 1.0, 0.0);
             }
+            if t0.is_nan() || t1.is_nan() {
+                return None;
+            }
             if t0 > tmin {
                 tmin = t0;
                 normal = n;
@@ -226,6 +236,9 @@ impl Aabb3D {
                 std::mem::swap(&mut t0, &mut t1);
                 n = Vec3::new(0.0, 0.0, 1.0);
             }
+            if t0.is_nan() || t1.is_nan() {
+                return None;
+            }
             if t0 > tmin {
                 tmin = t0;
                 normal = n;
@@ -238,13 +251,15 @@ impl Aabb3D {
             }
         }
 
-        if tmax < 0.0 || tmin < 0.0 {
+        if tmax < 0.0 || tmin.is_nan() || tmax.is_nan() {
             return None;
         }
 
+        let hit_dist = if tmin >= 0.0 { tmin } else { 0.0 };
+
         Some(RaycastHit {
-            distance: tmin,
-            point: ray.point_at(tmin),
+            distance: hit_dist,
+            point: ray.point_at(hit_dist),
             normal,
         })
     }

@@ -170,7 +170,7 @@ impl Mesh3D {
         }
 
         let vao = VertexArray::new(gl)?;
-        let vbo = VertexBuffer::new(gl, &self.vertices)?;
+        let vbo = VertexBuffer::new_dynamic(gl, &self.vertices)?;
         let ebo = IndexBuffer::new(gl, &self.indices)?;
 
         vao.bind(gl);
@@ -188,5 +188,12 @@ impl Mesh3D {
         self.ebo = Some(ebo);
 
         Ok(())
+    }
+
+    /// Re-uploads current host-side vertex data to the allocated GPU vertex buffer via buffer_sub_data.
+    pub fn update_gpu_buffers(&mut self, gl: &glow::Context) {
+        if let Some(ref mut vbo) = self.vbo {
+            vbo.update_sub_data(gl, 0, &self.vertices);
+        }
     }
 }

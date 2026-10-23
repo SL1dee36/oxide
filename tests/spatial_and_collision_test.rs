@@ -2,30 +2,45 @@ use oxide::prelude::*;
 
 #[test]
 fn test_transform_hierarchy_propagation() {
-    let mut scene = Scene::new();
+    let mut world = World::new();
 
-    let parent_id = scene.spawn_node(
-        "Parent",
-        NodeKind::Empty,
-        Transform::from_translation(Vec3::new(10.0, 0.0, 0.0)),
-        None,
-    );
+    let parent = world.spawn();
+    world.set_name(parent, "Parent");
+    world.set_transform(parent, Transform::from_translation(Vec3::new(10.0, 0.0, 0.0)));
 
-    let child_id = scene.spawn_node(
-        "Child",
-        NodeKind::Empty,
-        Transform::from_translation(Vec3::new(5.0, 2.0, 0.0)),
-        None,
-    );
+    let child = world.spawn();
+    world.set_name(child, "Child");
+    world.set_transform(child, Transform::from_translation(Vec3::new(5.0, 2.0, 0.0)));
 
-    scene.attach_child(parent_id, child_id);
-    scene.update_transforms();
+    world.attach_child(parent, child);
+    update_hierarchy_system(&mut world);
 
-    let child_global = scene.node(child_id).global_transform;
+    let child_global = world.global_transform(child).expect("Child global transform must exist");
     let expected_pos = Vec3::new(15.0, 2.0, 0.0);
     let actual_pos = child_global.transform_point3(Vec3::ZERO);
 
     assert!((actual_pos - expected_pos).length() < 1e-4);
+}
+
+#[test]
+fn test_ecs_component_insertion_and_retrieval() {
+    let mut world = World::new();
+    let entity = world.spawn();
+
+    // Test generic insert & get
+    world.insert(entity, Name("TestEntity".to_string()));
+    assert_eq!(world.get::<Name>(entity).unwrap().0, "TestEntity");
+    assert_eq!(world.name(entity).unwrap(), "TestEntity");
+
+    world.insert(entity, Visible(false));
+    assert!(world.has::<Visible>(entity));
+    assert!(!world.is_visible(entity));
+
+    // Test component removal
+    let removed = world.remove::<Visible>(entity);
+    assert!(removed.is_some());
+    assert!(!world.has::<Visible>(entity));
+    assert!(world.is_visible(entity));
 }
 
 #[test]
@@ -105,97 +120,82 @@ fn test_static_obstacle_penetration_resolution() {
 
 #[test]
 fn test_sphere_scale_collision() {
-    let mut scene = Scene::new();
+    let mut world = World::new();
 
     // Sphere A has radius 1.0, but scale 2.0 (effective radius 2.0)
-    let s_a = scene.spawn_node(
-        "SphereA",
-        NodeKind::Empty,
+    let s_a = world.spawn();
+    world.set_name(s_a, "SphereA");
+    world.set_transform(
+        s_a,
         Transform {
             translation: Vec3::ZERO,
             rotation: glam::Quat::IDENTITY,
             scale: Vec3::splat(2.0),
         },
-        Some(Collider::sphere(1.0)),
     );
+    world.insert(s_a, Collider::sphere(1.0));
 
     // Sphere B has radius 1.0, scale 1.0, at translation (2.5, 0.0, 0.0)
-    // Distance between centers is 2.5.
-    // Unscaled radii sum: 1.0 + 1.0 = 2.0 < 2.5 (no intersection).
-    // Scaled radii sum: 2.0 + 1.0 = 3.0 > 2.5 (intersects with depth 0.5!).
-    let s_b = scene.spawn_node(
-        "SphereB",
-        NodeKind::Empty,
-        Transform::from_translation(Vec3::new(2.5, 0.0, 0.0)),
-        Some(Collider::sphere(1.0)),
-    );
+    let s_b = world.spawn();
+    world.set_name(s_b, "SphereB");
+    world.set_transform(s_b, Transform::from_translation(Vec3::new(2.5, 0.0, 0.0)));
+    world.insert(s_b, Collider::sphere(1.0));
 
-    scene.update_transforms();
+    world.update_transforms();
 
-    let contact = scene.check_intersection(s_a, s_b).expect("Scaled sphere must intersect");
+    let contact = world.check_intersection(s_a, s_b).expect("Scaled sphere must intersect");
     assert!((contact.depth - 0.5).abs() < 1e-4);
     assert_eq!(contact.normal, Vec3::new(1.0, 0.0, 0.0));
 
     // Also verify raycast accounts for sphere scaling
     let ray = Ray3D::new(Vec3::new(0.0, 0.0, -10.0), Vec3::new(0.0, 0.0, 1.0));
-    let hit = scene.raycast(&ray).expect("Ray should hit scaled sphere");
+    let hit = world.raycast(&ray).expect("Ray should hit scaled sphere");
     // Center at (0, 0, 0), effective radius 2.0 -> hit at z = -2.0 -> distance = 8.0
     assert!((hit.1.distance - 8.0).abs() < 1e-4);
 }
 
 #[test]
 fn test_despawn_node() {
-    let mut scene = Scene::new();
+    let mut world = World::new();
 
-    let parent_id = scene.spawn_node(
-        "Parent",
-        NodeKind::Empty,
-        Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)),
-        None,
-    );
+    let parent = world.spawn();
+    world.set_name(parent, "Parent");
+    world.set_transform(parent, Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
 
-    let child_1 = scene.spawn_node(
-        "Child1",
-        NodeKind::Empty,
-        Transform::IDENTITY,
-        None,
-    );
+    let child_1 = world.spawn();
+    world.set_name(child_1, "Child1");
 
-    let child_2 = scene.spawn_node(
-        "Child2",
-        NodeKind::Empty,
-        Transform::IDENTITY,
-        None,
-    );
+    let child_2 = world.spawn();
+    world.set_name(child_2, "Child2");
 
-    scene.attach_child(parent_id, child_1);
-    scene.attach_child(parent_id, child_2);
+    world.attach_child(parent, child_1);
+    world.attach_child(parent, child_2);
 
-    assert_eq!(scene.node(parent_id).children.len(), 2);
-    assert!(scene.get_node(child_1).is_some());
-    assert!(scene.get_node(child_2).is_some());
+    assert_eq!(world.children(parent).unwrap().len(), 2);
+    assert!(world.is_alive(child_1));
+    assert!(world.is_alive(child_2));
 
     // Despawn child_1
-    assert!(scene.despawn_node(child_1));
-    assert!(scene.get_node(child_1).is_none());
-    assert!(!scene.node(parent_id).children.contains(&child_1));
-    assert_eq!(scene.node(parent_id).children.len(), 1);
+    assert!(world.despawn(child_1));
+    assert!(!world.is_alive(child_1));
+    assert!(!world.children(parent).unwrap().contains(&child_1));
+    assert_eq!(world.children(parent).unwrap().len(), 1);
 
     // Despawning again returns false
-    assert!(!scene.despawn_node(child_1));
+    assert!(!world.despawn(child_1));
 
     // Despawn parent should recursively despawn child_2
-    assert!(scene.despawn_node(parent_id));
-    assert!(scene.get_node(parent_id).is_none());
-    assert!(scene.get_node(child_2).is_none());
+    assert!(world.despawn(parent));
+    assert!(!world.is_alive(parent));
+    assert!(!world.is_alive(child_2));
 
-    // Invalid / out-of-bounds node id returns false
-    assert!(!scene.despawn_node(NodeId(9999)));
+    // Invalid / out-of-bounds entity returns false
+    assert!(!world.despawn(Entity::from_ffi(9999)));
 
-    // Collision check between despawned nodes gracefully returns None without panicking
-    assert!(scene.check_intersection(parent_id, child_1).is_none());
+    // Collision check between despawned entities gracefully returns None without panicking
+    assert!(world.check_intersection(parent, child_1).is_none());
 
-    // Penetration resolution between despawned nodes is safe no-op
+    // Penetration resolution between despawned entities is safe no-op
     let dummy_contact = ContactManifold::new(Vec3::X, 1.0, Vec3::ZERO);
-    scene.resolve_penetration(parent_id, child_1, &dummy_contact);
+    world.resolve_penetration(parent, child_1, &dummy_contact);
 }

@@ -14,9 +14,11 @@
 use crate::core::app::{App, AppHandler};
 use crate::core::color::Color;
 use crate::core::context::Context;
+use crate::ecs::entity::Entity;
+use crate::ecs::world::World;
+use crate::physics::{DistanceConstraint, RigidBody, RigidBodyType, SoftBody};
+use crate::renderer::render_system::RenderSystem;
 use crate::spatial::camera::Camera;
-use crate::spatial::node::{NodeId, NodeKind};
-use crate::spatial::scene::Scene;
 use crate::spatial::transform::Transform;
 use crate::text::text2d::Text2D;
 use crate::assets::mesh::Mesh3D;
@@ -207,7 +209,8 @@ pub struct OxideApp {
 
 /// Opaque scene graph container allocated on heap.
 pub struct OxideScene {
-    pub inner: Scene,
+    pub world: World,
+    pub render_system: RenderSystem,
 }
 
 struct FfiAppHandler {
@@ -591,7 +594,8 @@ pub unsafe extern "C" fn oxide_context_set_cursor_grab(
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_create() -> *mut OxideScene {
     Box::into_raw(Box::new(OxideScene {
-        inner: Scene::new(),
+        world: World::new(),
+        render_system: RenderSystem::new(),
     }))
 }
 
@@ -617,7 +621,7 @@ pub unsafe extern "C" fn oxide_scene_set_camera_perspective(
     if let Some(s) = scene.as_mut() {
         let mut cam = Camera::perspective(fov_deg, near, far);
         cam.look_at(eye.into(), target.into(), Vec3::Y);
-        s.inner.set_camera(cam);
+        s.world.set_camera(cam);
     }
 }
 
@@ -629,12 +633,12 @@ pub unsafe extern "C" fn oxide_scene_spawn_cube_3d(
     transform: OxideTransform,
 ) -> u64 {
     if let Some(s) = scene.as_mut() {
-        let id = s.inner.spawn_mesh_3d(
+        let id = s.world.spawn_mesh_3d(
             Mesh3D::cube(size),
             transform.into(),
             Collider::box_3d(Vec3::splat(size)),
         );
-        id.0 as u64
+        id.to_ffi()
     } else {
         u64::MAX
     }
@@ -648,12 +652,12 @@ pub unsafe extern "C" fn oxide_scene_spawn_sphere_3d(
     transform: OxideTransform,
 ) -> u64 {
     if let Some(s) = scene.as_mut() {
-        let id = s.inner.spawn_mesh_3d(
+        let id = s.world.spawn_mesh_3d(
             Mesh3D::sphere(radius, 24, 24),
             transform.into(),
             Collider::sphere(radius),
         );
-        id.0 as u64
+        id.to_ffi()
     } else {
         u64::MAX
     }
@@ -668,12 +672,12 @@ pub unsafe extern "C" fn oxide_scene_spawn_surface_2d(
     transform: OxideTransform,
 ) -> u64 {
     if let Some(s) = scene.as_mut() {
-        let id = s.inner.spawn_surface_2d(
+        let id = s.world.spawn_surface_2d(
             Surface2D::from_color(size.into(), color.into()),
             transform.into(),
             Collider::box_2d(size.into()),
         );
-        id.0 as u64
+        id.to_ffi()
     } else {
         u64::MAX
     }
@@ -695,13 +699,13 @@ pub unsafe extern "C" fn oxide_scene_spawn_text_2d(
             CStr::from_ptr(text).to_str().unwrap_or("")
         };
 
-        let id = s.inner.spawn_text_2d(
+        let id = s.world.spawn_text_2d(
             Text2D::new(text_str)
                 .with_color(color.into())
                 .with_scale(scale),
             transform.into(),
         );
-        id.0 as u64
+        id.to_ffi()
     } else {
         u64::MAX
     }
@@ -721,10 +725,9 @@ pub unsafe extern "C" fn oxide_scene_node_set_text(
             CStr::from_ptr(text).to_str().unwrap_or("")
         };
 
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            if let NodeKind::Text2D(ref mut t) = node.kind {
-                t.content = text_str.to_string();
-            }
+        let entity = Entity::from_ffi(node_id);
+        if let Some(t) = s.world.text_2d_mut(entity) {
+            t.content = text_str.to_string();
         }
     }
 }
@@ -741,8 +744,12 @@ pub unsafe extern "C" fn oxide_scene_set_light(
         let dir: Vec3 = direction.into();
         let col: Vec3 = color.into();
         let amb: Vec3 = ambient.into();
-        s.inner.set_light(crate::renderer::pipeline_3d::Light3D {
-            direction: if dir.length_squared() > 1e-6 { dir.normalize() } else { Vec3::Y },
+        s.world.set_light(crate::renderer::pipeline_3d::Light3D {
+            direction: if dir.length_squared() > 1e-6 {
+                dir.normalize()
+            } else {
+                Vec3::Y
+            },
             color: col,
             ambient: amb,
         });
@@ -758,7 +765,7 @@ pub unsafe extern "C" fn oxide_scene_set_camera_look_at(
     up: OxideVec3,
 ) {
     if let Some(s) = scene.as_mut() {
-        s.inner.camera_mut().look_at(eye.into(), target.into(), up.into());
+        s.world.camera_mut().look_at(eye.into(), target.into(), up.into());
     }
 }
 
@@ -772,8 +779,12 @@ pub unsafe extern "C" fn oxide_scene_spawn_cube_3d_colored(
 ) -> u64 {
     if let Some(s) = scene.as_mut() {
         let mesh = Mesh3D::cube(size).with_color(color.into());
-        let id = s.inner.spawn_mesh_3d(mesh, transform.into(), Collider::box_3d(Vec3::splat(size)));
-        id.0 as u64
+        let id = s.world.spawn_mesh_3d(
+            mesh,
+            transform.into(),
+            Collider::box_3d(Vec3::splat(size)),
+        );
+        id.to_ffi()
     } else {
         u64::MAX
     }
@@ -789,8 +800,8 @@ pub unsafe extern "C" fn oxide_scene_spawn_sphere_3d_colored(
 ) -> u64 {
     if let Some(s) = scene.as_mut() {
         let mesh = Mesh3D::sphere(radius, 24, 24).with_color(color.into());
-        let id = s.inner.spawn_mesh_3d(mesh, transform.into(), Collider::sphere(radius));
-        id.0 as u64
+        let id = s.world.spawn_mesh_3d(mesh, transform.into(), Collider::sphere(radius));
+        id.to_ffi()
     } else {
         u64::MAX
     }
@@ -810,11 +821,19 @@ pub unsafe extern "C" fn oxide_scene_spawn_box_3d(
     if let Some(s) = scene.as_mut() {
         let mesh = Mesh3D::box_mesh(width, height, depth).with_color(color.into());
         let id = if is_static {
-            s.inner.spawn_static_mesh_3d(mesh, transform.into(), Collider::box_3d(Vec3::new(width, height, depth)))
+            s.world.spawn_static_mesh_3d(
+                mesh,
+                transform.into(),
+                Collider::box_3d(Vec3::new(width, height, depth)),
+            )
         } else {
-            s.inner.spawn_mesh_3d(mesh, transform.into(), Collider::box_3d(Vec3::new(width, height, depth)))
+            s.world.spawn_mesh_3d(
+                mesh,
+                transform.into(),
+                Collider::box_3d(Vec3::new(width, height, depth)),
+            )
         };
-        id.0 as u64
+        id.to_ffi()
     } else {
         u64::MAX
     }
@@ -822,12 +841,9 @@ pub unsafe extern "C" fn oxide_scene_spawn_box_3d(
 
 /// Removes and despawns a node and all of its recursive children from the scene.
 #[no_mangle]
-pub unsafe extern "C" fn oxide_scene_despawn_node(
-    scene: *mut OxideScene,
-    node_id: u64,
-) -> bool {
+pub unsafe extern "C" fn oxide_scene_despawn_node(scene: *mut OxideScene, node_id: u64) -> bool {
     if let Some(s) = scene.as_mut() {
-        s.inner.despawn_node(NodeId(node_id as usize))
+        s.world.despawn(Entity::from_ffi(node_id))
     } else {
         false
     }
@@ -841,9 +857,10 @@ pub unsafe extern "C" fn oxide_scene_node_get_transform(
     out_transform: *mut OxideTransform,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node(NodeId(node_id as usize)) {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(t) = s.world.transform(entity) {
             if !out_transform.is_null() {
-                *out_transform = node.transform.into();
+                *out_transform = (*t).into();
             }
             return true;
         }
@@ -859,11 +876,9 @@ pub unsafe extern "C" fn oxide_scene_node_set_transform(
     transform: OxideTransform,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            node.transform = transform.into();
-            if node.parent.is_none() {
-                node.global_transform = node.transform.matrix();
-            }
+        let entity = Entity::from_ffi(node_id);
+        if s.world.is_alive(entity) {
+            s.world.set_transform(entity, transform.into());
             return true;
         }
     }
@@ -878,9 +893,10 @@ pub unsafe extern "C" fn oxide_scene_node_get_translation(
     out_translation: *mut OxideVec3,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node(NodeId(node_id as usize)) {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(t) = s.world.transform(entity) {
             if !out_translation.is_null() {
-                *out_translation = node.transform.translation.into();
+                *out_translation = t.translation.into();
             }
             return true;
         }
@@ -896,10 +912,12 @@ pub unsafe extern "C" fn oxide_scene_node_set_translation(
     translation: OxideVec3,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            node.transform.translation = translation.into();
-            if node.parent.is_none() {
-                node.global_transform = node.transform.matrix();
+        let entity = Entity::from_ffi(node_id);
+        if let Some(t) = s.world.transform_mut(entity) {
+            t.translation = translation.into();
+            let matrix = t.matrix();
+            if s.world.parent.get(entity).is_none() {
+                s.world.global_transform.insert(entity, matrix);
             }
             return true;
         }
@@ -915,9 +933,10 @@ pub unsafe extern "C" fn oxide_scene_node_get_rotation(
     out_rotation: *mut OxideQuat,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node(NodeId(node_id as usize)) {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(t) = s.world.transform(entity) {
             if !out_rotation.is_null() {
-                *out_rotation = node.transform.rotation.into();
+                *out_rotation = t.rotation.into();
             }
             return true;
         }
@@ -933,10 +952,12 @@ pub unsafe extern "C" fn oxide_scene_node_set_rotation(
     rotation: OxideQuat,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            node.transform.rotation = rotation.into();
-            if node.parent.is_none() {
-                node.global_transform = node.transform.matrix();
+        let entity = Entity::from_ffi(node_id);
+        if let Some(t) = s.world.transform_mut(entity) {
+            t.rotation = rotation.into();
+            let matrix = t.matrix();
+            if s.world.parent.get(entity).is_none() {
+                s.world.global_transform.insert(entity, matrix);
             }
             return true;
         }
@@ -952,10 +973,12 @@ pub unsafe extern "C" fn oxide_scene_node_rotate_y(
     rad: f32,
 ) {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            node.transform.rotate_y(rad);
-            if node.parent.is_none() {
-                node.global_transform = node.transform.matrix();
+        let entity = Entity::from_ffi(node_id);
+        if let Some(t) = s.world.transform_mut(entity) {
+            t.rotate_y(rad);
+            let matrix = t.matrix();
+            if s.world.parent.get(entity).is_none() {
+                s.world.global_transform.insert(entity, matrix);
             }
         }
     }
@@ -969,10 +992,12 @@ pub unsafe extern "C" fn oxide_scene_node_rotate_x(
     rad: f32,
 ) {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            node.transform.rotate_x(rad);
-            if node.parent.is_none() {
-                node.global_transform = node.transform.matrix();
+        let entity = Entity::from_ffi(node_id);
+        if let Some(t) = s.world.transform_mut(entity) {
+            t.rotate_x(rad);
+            let matrix = t.matrix();
+            if s.world.parent.get(entity).is_none() {
+                s.world.global_transform.insert(entity, matrix);
             }
         }
     }
@@ -986,10 +1011,12 @@ pub unsafe extern "C" fn oxide_scene_node_rotate_z(
     rad: f32,
 ) {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            node.transform.rotate_z(rad);
-            if node.parent.is_none() {
-                node.global_transform = node.transform.matrix();
+        let entity = Entity::from_ffi(node_id);
+        if let Some(t) = s.world.transform_mut(entity) {
+            t.rotate_z(rad);
+            let matrix = t.matrix();
+            if s.world.parent.get(entity).is_none() {
+                s.world.global_transform.insert(entity, matrix);
             }
         }
     }
@@ -1003,10 +1030,12 @@ pub unsafe extern "C" fn oxide_scene_node_set_scale(
     scale: OxideVec3,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            node.transform.scale = scale.into();
-            if node.parent.is_none() {
-                node.global_transform = node.transform.matrix();
+        let entity = Entity::from_ffi(node_id);
+        if let Some(t) = s.world.transform_mut(entity) {
+            t.scale = scale.into();
+            let matrix = t.matrix();
+            if s.world.parent.get(entity).is_none() {
+                s.world.global_transform.insert(entity, matrix);
             }
             return true;
         }
@@ -1022,15 +1051,21 @@ pub unsafe extern "C" fn oxide_scene_node_set_color(
     color: OxideColor,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            match node.kind {
-                NodeKind::Mesh3D(ref mut m) => m.color = color.into(),
-                NodeKind::Surface2D(ref mut surf) => surf.color = color.into(),
-                NodeKind::Text2D(ref mut txt) => txt.color = color.into(),
-                _ => {}
-            }
-            return true;
+        let entity = Entity::from_ffi(node_id);
+        let mut updated = false;
+        if let Some(m) = s.world.mesh_3d_mut(entity) {
+            m.color = color.into();
+            updated = true;
         }
+        if let Some(surf) = s.world.surface_2d_mut(entity) {
+            surf.color = color.into();
+            updated = true;
+        }
+        if let Some(txt) = s.world.text_2d_mut(entity) {
+            txt.color = color.into();
+            updated = true;
+        }
+        return updated;
     }
     false
 }
@@ -1043,8 +1078,9 @@ pub unsafe extern "C" fn oxide_scene_node_set_visible(
     visible: bool,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            node.visible = visible;
+        let entity = Entity::from_ffi(node_id);
+        if s.world.is_alive(entity) {
+            s.world.set_visible(entity, visible);
             return true;
         }
     }
@@ -1059,8 +1095,9 @@ pub unsafe extern "C" fn oxide_scene_node_set_static(
     is_static: bool,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
-            node.is_static = is_static;
+        let entity = Entity::from_ffi(node_id);
+        if s.world.is_alive(entity) {
+            s.world.set_static(entity, is_static);
             return true;
         }
     }
@@ -1079,11 +1116,11 @@ pub unsafe extern "C" fn oxide_scene_raycast(
         let dir: Vec3 = direction.into();
         if dir.length_squared() > 1e-6 {
             let ray = Ray3D::new(origin.into(), dir);
-            s.inner.update_transforms();
-            if let Some((node_id, hit)) = s.inner.raycast(&ray) {
+            s.world.update_transforms();
+            if let Some((hit_entity, hit)) = s.world.raycast(&ray) {
                 if !out_hit.is_null() {
                     *out_hit = OxideRaycastHit {
-                        node_id: node_id.0 as u64,
+                        node_id: hit_entity.to_ffi(),
                         distance: hit.distance,
                         point: hit.point.into(),
                         normal: hit.normal.into(),
@@ -1105,7 +1142,9 @@ pub unsafe extern "C" fn oxide_scene_check_collision(
     out_contact: *mut OxideContact,
 ) -> bool {
     if let Some(s) = scene.as_mut() {
-        if let Some(contact) = s.inner.check_intersection(NodeId(node_a as usize), NodeId(node_b as usize)) {
+        let a = Entity::from_ffi(node_a);
+        let b = Entity::from_ffi(node_b);
+        if let Some(contact) = s.world.check_intersection(a, b) {
             if !out_contact.is_null() {
                 *out_contact = contact.into();
             }
@@ -1125,8 +1164,10 @@ pub unsafe extern "C" fn oxide_scene_resolve_penetration(
 ) {
     if let Some(s) = scene.as_mut() {
         if let Some(c) = contact.as_ref() {
+            let a = Entity::from_ffi(node_a);
+            let b = Entity::from_ffi(node_b);
             let manifold: ContactManifold = (*c).into();
-            s.inner.resolve_penetration(NodeId(node_a as usize), NodeId(node_b as usize), &manifold);
+            s.world.resolve_penetration(a, b, &manifold);
         }
     }
 }
@@ -1139,7 +1180,7 @@ pub unsafe extern "C" fn oxide_scene_update(
     dt: f32,
 ) {
     if let (Some(s), Some(c)) = (scene.as_mut(), ctx.as_mut().and_then(|x| x.ctx.as_mut())) {
-        s.inner.update(c, dt);
+        s.world.update(c, dt);
     }
 }
 
@@ -1150,6 +1191,436 @@ pub unsafe extern "C" fn oxide_scene_render(
     ctx: *mut OxideContext,
 ) {
     if let (Some(s), Some(c)) = (scene.as_mut(), ctx.as_mut().and_then(|x| x.ctx.as_mut())) {
-        s.inner.render(c);
+        s.render_system.render_world(c, &mut s.world);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Physics Simulation C ABI
+// ---------------------------------------------------------------------------
+
+/// Advances the physics simulation for all dynamic rigid bodies and deformable soft bodies in the scene.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_step_physics(
+    scene: *mut OxideScene,
+    dt: f32,
+) {
+    if let Some(s) = scene.as_mut() {
+        s.world.step_physics(dt);
+    }
+}
+
+/// Spawns a box mesh node with an attached rigid body and collider.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_spawn_rigid_body_box(
+    scene: *mut OxideScene,
+    size: OxideVec3,
+    transform: OxideTransform,
+    mass: f32,
+    restitution: f32,
+    friction: f32,
+    is_static: bool,
+) -> u64 {
+    if let Some(s) = scene.as_mut() {
+        let size_v = Vec3::new(size.x, size.y, size.z);
+        let mesh = Mesh3D::box_mesh(size.x, size.y, size.z);
+        let collider = Collider::box_3d(size_v);
+        let body_type = if is_static {
+            RigidBodyType::Static
+        } else {
+            RigidBodyType::Dynamic
+        };
+        let rb = RigidBody::new(mass, body_type)
+            .with_restitution(restitution)
+            .with_friction(friction);
+        let entity = s.world.spawn_rigid_body_with_mesh(mesh, transform.into(), collider, rb);
+        return entity.to_ffi();
+    }
+    0
+}
+
+/// Spawns a spherical mesh node with an attached rigid body and collider.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_spawn_rigid_body_sphere(
+    scene: *mut OxideScene,
+    radius: f32,
+    transform: OxideTransform,
+    mass: f32,
+    restitution: f32,
+    friction: f32,
+    is_static: bool,
+) -> u64 {
+    if let Some(s) = scene.as_mut() {
+        let mesh = Mesh3D::sphere(radius, 16, 16);
+        let collider = Collider::sphere(radius);
+        let body_type = if is_static {
+            RigidBodyType::Static
+        } else {
+            RigidBodyType::Dynamic
+        };
+        let rb = RigidBody::new(mass, body_type)
+            .with_restitution(restitution)
+            .with_friction(friction);
+        let entity = s.world.spawn_rigid_body_with_mesh(mesh, transform.into(), collider, rb);
+        return entity.to_ffi();
+    }
+    0
+}
+
+/// Attaches a [`RigidBody`] component to an existing entity node.
+///
+/// `body_type`: 0 = Dynamic, 1 = Static, 2 = Kinematic.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_add_rigid_body(
+    scene: *mut OxideScene,
+    node_id: u64,
+    mass: f32,
+    restitution: f32,
+    friction: f32,
+    body_type: u32,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if s.world.is_alive(entity) {
+            let rb_type = match body_type {
+                1 => RigidBodyType::Static,
+                2 => RigidBodyType::Kinematic,
+                _ => RigidBodyType::Dynamic,
+            };
+            let rb = RigidBody::new(mass, rb_type)
+                .with_restitution(restitution)
+                .with_friction(friction);
+            s.world.rigid_body.insert(entity, rb);
+            return true;
+        }
+    }
+    false
+}
+
+/// Applies a persistent spatial force to a rigid body's force accumulator.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_rigid_body_apply_force(
+    scene: *mut OxideScene,
+    node_id: u64,
+    force: OxideVec3,
+) {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(rb) = s.world.rigid_body.get_mut(entity) {
+            rb.apply_force(force.into());
+        }
+    }
+}
+
+/// Applies a rotational torque to a rigid body's torque accumulator.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_rigid_body_apply_torque(
+    scene: *mut OxideScene,
+    node_id: u64,
+    torque: OxideVec3,
+) {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(rb) = s.world.rigid_body.get_mut(entity) {
+            rb.apply_torque(torque.into());
+        }
+    }
+}
+
+/// Applies an instantaneous linear velocity impulse to a rigid body.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_rigid_body_apply_impulse(
+    scene: *mut OxideScene,
+    node_id: u64,
+    impulse: OxideVec3,
+) {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(rb) = s.world.rigid_body.get_mut(entity) {
+            rb.apply_impulse(impulse.into());
+        }
+    }
+}
+
+/// Overwrites a rigid body's linear velocity.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_rigid_body_set_velocity(
+    scene: *mut OxideScene,
+    node_id: u64,
+    velocity: OxideVec3,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(rb) = s.world.rigid_body.get_mut(entity) {
+            rb.velocity = velocity.into();
+            return true;
+        }
+    }
+    false
+}
+
+/// Retrieves a rigid body's current linear velocity vector.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_rigid_body_get_velocity(
+    scene: *mut OxideScene,
+    node_id: u64,
+    out_velocity: *mut OxideVec3,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(rb) = s.world.rigid_body.get(entity) {
+            if !out_velocity.is_null() {
+                *out_velocity = rb.velocity.into();
+            }
+            return true;
+        }
+    }
+    false
+}
+
+/// Overwrites a rigid body's angular velocity.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_rigid_body_set_angular_velocity(
+    scene: *mut OxideScene,
+    node_id: u64,
+    ang_vel: OxideVec3,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(rb) = s.world.rigid_body.get_mut(entity) {
+            rb.angular_velocity = ang_vel.into();
+            return true;
+        }
+    }
+    false
+}
+
+/// Retrieves a rigid body's current angular velocity vector.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_rigid_body_get_angular_velocity(
+    scene: *mut OxideScene,
+    node_id: u64,
+    out_ang_vel: *mut OxideVec3,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(rb) = s.world.rigid_body.get(entity) {
+            if !out_ang_vel.is_null() {
+                *out_ang_vel = rb.angular_velocity.into();
+            }
+            return true;
+        }
+    }
+    false
+}
+
+/// Retrieves a rigid body's mass in kilograms.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_rigid_body_get_mass(
+    scene: *mut OxideScene,
+    node_id: u64,
+    out_mass: *mut f32,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(rb) = s.world.rigid_body.get(entity) {
+            if !out_mass.is_null() {
+                *out_mass = rb.mass;
+            }
+            return true;
+        }
+    }
+    false
+}
+
+/// Spawns a deformable cloth soft body with spring constraints and triangular mesh.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_spawn_soft_body_cloth(
+    scene: *mut OxideScene,
+    width: f32,
+    height: f32,
+    segments_x: u32,
+    segments_y: u32,
+    total_mass: f32,
+    stiffness: f32,
+    transform: OxideTransform,
+) -> u64 {
+    if let Some(s) = scene.as_mut() {
+        let entity = s.world.spawn_soft_body_cloth(
+            width,
+            height,
+            segments_x as usize,
+            segments_y as usize,
+            total_mass,
+            stiffness,
+            transform.into(),
+        );
+        return entity.to_ffi();
+    }
+    0
+}
+
+/// Attaches a cloth soft body simulation component to an existing mesh entity.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_add_soft_body_cloth(
+    scene: *mut OxideScene,
+    node_id: u64,
+    width: f32,
+    height: f32,
+    segments_x: u32,
+    segments_y: u32,
+    total_mass: f32,
+    stiffness: f32,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if s.world.is_alive(entity) {
+            let (sb, _mesh) = SoftBody::cloth(width, height, segments_x as usize, segments_y as usize, total_mass, stiffness);
+            s.world.soft_body.insert(entity, sb);
+            return true;
+        }
+    }
+    false
+}
+
+/// Marks or unmarks a specific soft body particle as immobile (pinned).
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_soft_body_set_particle_fixed(
+    scene: *mut OxideScene,
+    node_id: u64,
+    particle_idx: u32,
+    fixed: bool,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(sb) = s.world.soft_body.get_mut(entity) {
+            sb.set_particle_fixed(particle_idx as usize, fixed);
+            return true;
+        }
+    }
+    false
+}
+
+/// Retrieves the total number of particles in a soft body component.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_soft_body_get_particle_count(
+    scene: *mut OxideScene,
+    node_id: u64,
+    out_count: *mut u32,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(sb) = s.world.soft_body.get(entity) {
+            if !out_count.is_null() {
+                *out_count = sb.particles.len() as u32;
+            }
+            return true;
+        }
+    }
+    false
+}
+
+/// Retrieves the current world position of a specific soft body particle.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_soft_body_get_particle_position(
+    scene: *mut OxideScene,
+    node_id: u64,
+    particle_idx: u32,
+    out_pos: *mut OxideVec3,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(sb) = s.world.soft_body.get(entity) {
+            if let Some(p) = sb.particles.get(particle_idx as usize) {
+                if !out_pos.is_null() {
+                    *out_pos = p.position.into();
+                }
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Sets the world position of a specific soft body particle.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_soft_body_set_particle_position(
+    scene: *mut OxideScene,
+    node_id: u64,
+    particle_idx: u32,
+    pos: OxideVec3,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(sb) = s.world.soft_body.get_mut(entity) {
+            if let Some(p) = sb.particles.get_mut(particle_idx as usize) {
+                p.position = pos.into();
+                p.old_position = p.position;
+                p.predicted_position = p.position;
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Adds a distance constraint connecting two particles in a soft body.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_soft_body_add_constraint(
+    scene: *mut OxideScene,
+    node_id: u64,
+    particle_a: u32,
+    particle_b: u32,
+    rest_length: f32,
+    stiffness: f32,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(sb) = s.world.soft_body.get_mut(entity) {
+            sb.add_constraint(DistanceConstraint::new(
+                particle_a as usize,
+                particle_b as usize,
+                rest_length,
+                stiffness,
+            ));
+            return true;
+        }
+    }
+    false
+}
+
+/// Sets the XPBD compliance parameter $\alpha$ (elasticity) for a soft body.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_soft_body_set_compliance(
+    scene: *mut OxideScene,
+    node_id: u64,
+    compliance: f32,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(sb) = s.world.soft_body.get_mut(entity) {
+            sb.compliance = compliance.max(0.0);
+            return true;
+        }
+    }
+    false
+}
+
+/// Configures the number of PBD solver sub-steps per physics update for a soft body.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_soft_body_set_substeps(
+    scene: *mut OxideScene,
+    node_id: u64,
+    substeps: u32,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let entity = Entity::from_ffi(node_id);
+        if let Some(sb) = s.world.soft_body.get_mut(entity) {
+            sb.substeps = substeps.max(1);
+            return true;
+        }
+    }
+    false
+}
+
+

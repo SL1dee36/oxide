@@ -147,6 +147,29 @@ bool oxide_scene_raycast(OxideScene* scene, OxideVec3 origin, OxideVec3 directio
 void oxide_scene_update(OxideScene* scene, OxideContext* ctx, float dt);
 void oxide_scene_render(OxideScene* scene, OxideContext* ctx);
 
+// Physics Simulation
+void oxide_scene_step_physics(OxideScene* scene, float dt);
+uint64_t oxide_scene_spawn_rigid_body_box(OxideScene* scene, OxideVec3 size, OxideTransform transform, float mass, float restitution, float friction, bool is_static);
+uint64_t oxide_scene_spawn_rigid_body_sphere(OxideScene* scene, float radius, OxideTransform transform, float mass, float restitution, float friction, bool is_static);
+bool oxide_scene_add_rigid_body(OxideScene* scene, uint64_t node_id, float mass, float restitution, float friction, uint32_t body_type);
+void oxide_scene_rigid_body_apply_force(OxideScene* scene, uint64_t node_id, OxideVec3 force);
+void oxide_scene_rigid_body_apply_torque(OxideScene* scene, uint64_t node_id, OxideVec3 torque);
+void oxide_scene_rigid_body_apply_impulse(OxideScene* scene, uint64_t node_id, OxideVec3 impulse);
+bool oxide_scene_rigid_body_set_velocity(OxideScene* scene, uint64_t node_id, OxideVec3 velocity);
+bool oxide_scene_rigid_body_get_velocity(OxideScene* scene, uint64_t node_id, OxideVec3* out_velocity);
+bool oxide_scene_rigid_body_set_angular_velocity(OxideScene* scene, uint64_t node_id, OxideVec3 ang_vel);
+bool oxide_scene_rigid_body_get_angular_velocity(OxideScene* scene, uint64_t node_id, OxideVec3* out_ang_vel);
+bool oxide_scene_rigid_body_get_mass(OxideScene* scene, uint64_t node_id, float* out_mass);
+uint64_t oxide_scene_spawn_soft_body_cloth(OxideScene* scene, float width, float height, uint32_t segments_x, uint32_t segments_y, float total_mass, float stiffness, OxideTransform transform);
+bool oxide_scene_node_add_soft_body_cloth(OxideScene* scene, uint64_t node_id, float width, float height, uint32_t segments_x, uint32_t segments_y, float total_mass, float stiffness);
+bool oxide_scene_soft_body_set_particle_fixed(OxideScene* scene, uint64_t node_id, uint32_t particle_idx, bool fixed);
+bool oxide_scene_soft_body_get_particle_count(OxideScene* scene, uint64_t node_id, uint32_t* out_count);
+bool oxide_scene_soft_body_get_particle_position(OxideScene* scene, uint64_t node_id, uint32_t particle_idx, OxideVec3* out_pos);
+bool oxide_scene_soft_body_set_particle_position(OxideScene* scene, uint64_t node_id, uint32_t particle_idx, OxideVec3 pos);
+bool oxide_scene_soft_body_add_constraint(OxideScene* scene, uint64_t node_id, uint32_t particle_a, uint32_t particle_b, float rest_length, float stiffness);
+bool oxide_scene_soft_body_set_compliance(OxideScene* scene, uint64_t node_id, float compliance);
+bool oxide_scene_soft_body_set_substeps(OxideScene* scene, uint64_t node_id, uint32_t substeps);
+
 #ifdef __cplusplus
 }
 #endif

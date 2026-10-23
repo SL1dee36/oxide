@@ -11,10 +11,14 @@ pub mod assets;
 pub mod collision;
 /// Runtime lifecycle, application context, event loop, and time tracking.
 pub mod core;
+/// Entity-Component-System (ECS) architecture, decoupled component tables, and systems.
+pub mod ecs;
 /// C-compatible foreign function interface (FFI) bindings.
 pub mod ffi;
 /// Mathematics re-exports and angle conversion utilities.
 pub mod math;
+/// Real-time physics simulation, rigid bodies, soft bodies, and impulse/PBD solvers.
+pub mod physics;
 /// Commonly used engine types and functions for unified import.
 pub mod prelude;
 /// OpenGL 3.3 Core Profile graphics pipelines, shaders, and GPU buffers.

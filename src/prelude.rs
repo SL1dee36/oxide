@@ -3,16 +3,23 @@ pub use crate::assets::{
     Surface2D,
 };
 pub use crate::collision::{
-    resolve_penetration, resolve_penetration_weighted, Aabb2D, Aabb3D, BoundingSphere, Collider, ContactManifold, Ray3D,
-    RaycastHit,
+    check_collider_intersection, check_entity_intersection, raycast_system, resolve_penetration,
+    resolve_penetration_system, resolve_penetration_weighted, Aabb2D, Aabb3D, BoundingSphere,
+    Collider, ContactManifold, Ray3D, RaycastHit,
 };
 pub use crate::core::{
     App, AppBuilder, AppHandler, Color, Context, InputState, KeyCode, MouseButton, OxideError,
     Time,
 };
-pub use crate::math::*;
-pub use crate::renderer::{Light3D, Pipeline2D, Pipeline3D, Texture2D, Vertex3D};
-pub use crate::spatial::{
-    Camera, NodeBehavior, NodeId, NodeKind, Projection, Scene, SpatialNode, Transform,
+pub use crate::ecs::{
+    Component, Entity, EntityId, Name, NodeBehavior, Visible, World,
 };
+pub use crate::math::*;
+pub use crate::physics::{
+    step_physics_system, step_rigid_body_system, step_soft_body_system, DistanceConstraint,
+    PhysicsConfig, RigidBody, RigidBodyType, SoftBody, SoftBodySystem, SoftParticle,
+    SpringConstraint,
+};
+pub use crate::renderer::{Light3D, Pipeline2D, Pipeline3D, RenderSystem, Texture2D, Vertex3D};
+pub use crate::spatial::{update_hierarchy_system, Camera, NodeId, Projection, Scene, Transform};
 pub use crate::text::{Font, FontAtlas, Glyph, PipelineText, Text2D};

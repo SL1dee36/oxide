@@ -119,6 +119,21 @@ impl VertexBuffer {
         }
     }
 
+    /// Updates an in-place sub-slice of existing buffer data using `gl.buffer_sub_data_u8_slice`.
+    pub fn update_sub_data<T: Pod + Zeroable>(&mut self, gl: &glow::Context, offset_bytes: i32, data: &[T]) {
+        unsafe {
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.id));
+            let slice = bytemuck::cast_slice(data);
+            if data.len() <= self.count && offset_bytes == 0 {
+                gl.buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, offset_bytes, slice);
+            } else {
+                gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice, glow::DYNAMIC_DRAW);
+                self.count = data.len();
+            }
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+        }
+    }
+
     /// Binds buffer to `GL_ARRAY_BUFFER` target.
     #[inline]
     pub fn bind(&self, gl: &glow::Context) {
