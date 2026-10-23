@@ -12,6 +12,7 @@ layout(location = 1) in vec3 a_normal;
 layout(location = 2) in vec2 a_uv;
 
 uniform mat4 u_model;
+uniform mat3 u_normal_matrix;
 uniform mat4 u_view;
 uniform mat4 u_projection;
 
@@ -22,8 +23,7 @@ out vec3 v_frag_pos;
 void main() {
     vec4 world_pos = u_model * vec4(a_position, 1.0);
     v_frag_pos = world_pos.xyz;
-    mat3 normal_matrix = mat3(transpose(inverse(u_model)));
-    v_normal = normalize(normal_matrix * a_normal);
+    v_normal = normalize(u_normal_matrix * a_normal);
     v_uv = a_uv;
     gl_Position = u_projection * u_view * world_pos;
 }
@@ -149,7 +149,9 @@ impl Pipeline3D {
         vao: &VertexArray,
         ebo: &IndexBuffer,
     ) {
+        let normal_matrix = glam::Mat3::from_mat4(*model).inverse().transpose();
         self.shader.set_mat4(gl, "u_model", model);
+        self.shader.set_mat3(gl, "u_normal_matrix", &normal_matrix);
         self.shader.set_vec4(gl, "u_albedo_color", albedo.to_vec4());
         self.shader.set_vec3(gl, "u_emissive_color", Vec3::new(emissive.r, emissive.g, emissive.b));
 

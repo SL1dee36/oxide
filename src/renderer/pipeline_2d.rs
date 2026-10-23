@@ -40,7 +40,7 @@ void main() {
 "#;
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex2D {
     position: [f32; 2],
     uv: [f32; 2],

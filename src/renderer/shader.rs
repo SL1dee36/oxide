@@ -1,9 +1,12 @@
 use crate::core::error::OxideError;
 use glow::HasContext;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 /// OpenGL shader program managing compilation, linking, and uniform updates.
 pub struct ShaderProgram {
     id: glow::Program,
+    uniform_cache: RefCell<HashMap<String, Option<glow::UniformLocation>>>,
 }
 
 impl ShaderProgram {
@@ -42,7 +45,10 @@ impl ShaderProgram {
             gl.delete_shader(vertex_shader);
             gl.delete_shader(fragment_shader);
 
-            Ok(Self { id: program })
+            Ok(Self {
+                id: program,
+                uniform_cache: RefCell::new(HashMap::new()),
+            })
         }
     }
 
@@ -75,6 +81,16 @@ impl ShaderProgram {
         Ok(shader)
     }
 
+    fn get_location(&self, gl: &glow::Context, name: &str) -> Option<glow::UniformLocation> {
+        let mut cache = self.uniform_cache.borrow_mut();
+        if let Some(loc) = cache.get(name) {
+            return *loc;
+        }
+        let loc = unsafe { gl.get_uniform_location(self.id, name) };
+        cache.insert(name.to_string(), loc);
+        loc
+    }
+
     /// Activates the shader program for subsequent draw calls (`glUseProgram`).
     #[inline]
     pub fn bind(&self, gl: &glow::Context) {
@@ -93,17 +109,26 @@ impl ShaderProgram {
 
     /// Uploads a 4x4 matrix uniform value.
     pub fn set_mat4(&self, gl: &glow::Context, name: &str, matrix: &glam::Mat4) {
-        unsafe {
-            if let Some(loc) = gl.get_uniform_location(self.id, name) {
+        if let Some(loc) = self.get_location(gl, name) {
+            unsafe {
                 gl.uniform_matrix_4_f32_slice(Some(&loc), false, &matrix.to_cols_array());
+            }
+        }
+    }
+
+    /// Uploads a 3x3 matrix uniform value.
+    pub fn set_mat3(&self, gl: &glow::Context, name: &str, matrix: &glam::Mat3) {
+        if let Some(loc) = self.get_location(gl, name) {
+            unsafe {
+                gl.uniform_matrix_3_f32_slice(Some(&loc), false, &matrix.to_cols_array());
             }
         }
     }
 
     /// Uploads a 3-component vector uniform value.
     pub fn set_vec3(&self, gl: &glow::Context, name: &str, vec: glam::Vec3) {
-        unsafe {
-            if let Some(loc) = gl.get_uniform_location(self.id, name) {
+        if let Some(loc) = self.get_location(gl, name) {
+            unsafe {
                 gl.uniform_3_f32(Some(&loc), vec.x, vec.y, vec.z);
             }
         }
@@ -111,8 +136,8 @@ impl ShaderProgram {
 
     /// Uploads a 4-component vector uniform value.
     pub fn set_vec4(&self, gl: &glow::Context, name: &str, vec: glam::Vec4) {
-        unsafe {
-            if let Some(loc) = gl.get_uniform_location(self.id, name) {
+        if let Some(loc) = self.get_location(gl, name) {
+            unsafe {
                 gl.uniform_4_f32(Some(&loc), vec.x, vec.y, vec.z, vec.w);
             }
         }
@@ -120,8 +145,8 @@ impl ShaderProgram {
 
     /// Uploads a single 32-bit floating-point scalar uniform.
     pub fn set_float(&self, gl: &glow::Context, name: &str, value: f32) {
-        unsafe {
-            if let Some(loc) = gl.get_uniform_location(self.id, name) {
+        if let Some(loc) = self.get_location(gl, name) {
+            unsafe {
                 gl.uniform_1_f32(Some(&loc), value);
             }
         }
@@ -129,8 +154,8 @@ impl ShaderProgram {
 
     /// Uploads a 32-bit signed integer uniform (e.g. sampler binding unit).
     pub fn set_int(&self, gl: &glow::Context, name: &str, value: i32) {
-        unsafe {
-            if let Some(loc) = gl.get_uniform_location(self.id, name) {
+        if let Some(loc) = self.get_location(gl, name) {
+            unsafe {
                 gl.uniform_1_i32(Some(&loc), value);
             }
         }

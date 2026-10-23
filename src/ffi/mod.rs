@@ -341,6 +341,26 @@ pub unsafe extern "C" fn oxide_context_get_aspect_ratio(ctx: *mut OxideContext) 
     }
 }
 
+/// Returns active viewport width in pixels.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_get_width(ctx: *mut OxideContext) -> u32 {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        c.width
+    } else {
+        0
+    }
+}
+
+/// Returns active viewport height in pixels.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_get_height(ctx: *mut OxideContext) -> u32 {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        c.height
+    } else {
+        0
+    }
+}
+
 // ==========================================
 // Context Input API
 // ==========================================
@@ -588,14 +608,14 @@ pub unsafe extern "C" fn oxide_scene_destroy(scene: *mut OxideScene) {
 pub unsafe extern "C" fn oxide_scene_set_camera_perspective(
     scene: *mut OxideScene,
     fov_deg: f32,
-    aspect: f32,
+    _aspect: f32,
     near: f32,
     far: f32,
     eye: OxideVec3,
     target: OxideVec3,
 ) {
     if let Some(s) = scene.as_mut() {
-        let mut cam = Camera::perspective(fov_deg, aspect, near, far);
+        let mut cam = Camera::perspective(fov_deg, near, far);
         cam.look_at(eye.into(), target.into(), Vec3::Y);
         s.inner.set_camera(cam);
     }
@@ -701,8 +721,10 @@ pub unsafe extern "C" fn oxide_scene_node_set_text(
             CStr::from_ptr(text).to_str().unwrap_or("")
         };
 
-        if let NodeKind::Text2D(ref mut t) = s.inner.node_mut(NodeId(node_id as usize)).kind {
-            t.content = text_str.to_string();
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            if let NodeKind::Text2D(ref mut t) = node.kind {
+                t.content = text_str.to_string();
+            }
         }
     }
 }
@@ -798,6 +820,19 @@ pub unsafe extern "C" fn oxide_scene_spawn_box_3d(
     }
 }
 
+/// Removes and despawns a node and all of its recursive children from the scene.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_despawn_node(
+    scene: *mut OxideScene,
+    node_id: u64,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        s.inner.despawn_node(NodeId(node_id as usize))
+    } else {
+        false
+    }
+}
+
 /// Retrieves the local transform of a spatial node.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_node_get_transform(
@@ -826,7 +861,9 @@ pub unsafe extern "C" fn oxide_scene_node_set_transform(
     if let Some(s) = scene.as_mut() {
         if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
             node.transform = transform.into();
-            node.global_transform = node.transform.matrix();
+            if node.parent.is_none() {
+                node.global_transform = node.transform.matrix();
+            }
             return true;
         }
     }
@@ -861,7 +898,9 @@ pub unsafe extern "C" fn oxide_scene_node_set_translation(
     if let Some(s) = scene.as_mut() {
         if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
             node.transform.translation = translation.into();
-            node.global_transform = node.transform.matrix();
+            if node.parent.is_none() {
+                node.global_transform = node.transform.matrix();
+            }
             return true;
         }
     }
@@ -896,7 +935,9 @@ pub unsafe extern "C" fn oxide_scene_node_set_rotation(
     if let Some(s) = scene.as_mut() {
         if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
             node.transform.rotation = rotation.into();
-            node.global_transform = node.transform.matrix();
+            if node.parent.is_none() {
+                node.global_transform = node.transform.matrix();
+            }
             return true;
         }
     }
@@ -913,7 +954,9 @@ pub unsafe extern "C" fn oxide_scene_node_rotate_y(
     if let Some(s) = scene.as_mut() {
         if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
             node.transform.rotate_y(rad);
-            node.global_transform = node.transform.matrix();
+            if node.parent.is_none() {
+                node.global_transform = node.transform.matrix();
+            }
         }
     }
 }
@@ -928,7 +971,9 @@ pub unsafe extern "C" fn oxide_scene_node_rotate_x(
     if let Some(s) = scene.as_mut() {
         if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
             node.transform.rotate_x(rad);
-            node.global_transform = node.transform.matrix();
+            if node.parent.is_none() {
+                node.global_transform = node.transform.matrix();
+            }
         }
     }
 }
@@ -943,7 +988,9 @@ pub unsafe extern "C" fn oxide_scene_node_rotate_z(
     if let Some(s) = scene.as_mut() {
         if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
             node.transform.rotate_z(rad);
-            node.global_transform = node.transform.matrix();
+            if node.parent.is_none() {
+                node.global_transform = node.transform.matrix();
+            }
         }
     }
 }
@@ -958,7 +1005,9 @@ pub unsafe extern "C" fn oxide_scene_node_set_scale(
     if let Some(s) = scene.as_mut() {
         if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
             node.transform.scale = scale.into();
-            node.global_transform = node.transform.matrix();
+            if node.parent.is_none() {
+                node.global_transform = node.transform.matrix();
+            }
             return true;
         }
     }

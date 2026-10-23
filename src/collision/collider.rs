@@ -156,56 +156,89 @@ impl Aabb3D {
 
     /// Performs slab-method ray intersection against this AABB.
     pub fn raycast(&self, ray: &Ray3D) -> Option<RaycastHit> {
-        let mut tmin = (self.min.x - ray.origin.x) / ray.direction.x;
-        let mut tmax = (self.max.x - ray.origin.x) / ray.direction.x;
-        let mut normal = Vec3::new(-1.0, 0.0, 0.0);
+        let mut tmin = f32::NEG_INFINITY;
+        let mut tmax = f32::INFINITY;
+        let mut normal = Vec3::ZERO;
 
-        if tmin > tmax {
-            std::mem::swap(&mut tmin, &mut tmax);
-            normal = Vec3::new(1.0, 0.0, 0.0);
+        // X axis slab test
+        if ray.direction.x.abs() < 1e-8 {
+            if ray.origin.x < self.min.x || ray.origin.x > self.max.x {
+                return None;
+            }
+        } else {
+            let inv_d = 1.0 / ray.direction.x;
+            let mut t0 = (self.min.x - ray.origin.x) * inv_d;
+            let mut t1 = (self.max.x - ray.origin.x) * inv_d;
+            let mut n = Vec3::new(-1.0, 0.0, 0.0);
+            if t0 > t1 {
+                std::mem::swap(&mut t0, &mut t1);
+                n = Vec3::new(1.0, 0.0, 0.0);
+            }
+            if t0 > tmin {
+                tmin = t0;
+                normal = n;
+            }
+            if t1 < tmax {
+                tmax = t1;
+            }
+            if tmin > tmax {
+                return None;
+            }
         }
 
-        let mut tymin = (self.min.y - ray.origin.y) / ray.direction.y;
-        let mut tymax = (self.max.y - ray.origin.y) / ray.direction.y;
-        let mut y_normal = Vec3::new(0.0, -1.0, 0.0);
-
-        if tymin > tymax {
-            std::mem::swap(&mut tymin, &mut tymax);
-            y_normal = Vec3::new(0.0, 1.0, 0.0);
+        // Y axis slab test
+        if ray.direction.y.abs() < 1e-8 {
+            if ray.origin.y < self.min.y || ray.origin.y > self.max.y {
+                return None;
+            }
+        } else {
+            let inv_d = 1.0 / ray.direction.y;
+            let mut t0 = (self.min.y - ray.origin.y) * inv_d;
+            let mut t1 = (self.max.y - ray.origin.y) * inv_d;
+            let mut n = Vec3::new(0.0, -1.0, 0.0);
+            if t0 > t1 {
+                std::mem::swap(&mut t0, &mut t1);
+                n = Vec3::new(0.0, 1.0, 0.0);
+            }
+            if t0 > tmin {
+                tmin = t0;
+                normal = n;
+            }
+            if t1 < tmax {
+                tmax = t1;
+            }
+            if tmin > tmax {
+                return None;
+            }
         }
 
-        if (tmin > tymax) || (tymin > tmax) {
-            return None;
+        // Z axis slab test
+        if ray.direction.z.abs() < 1e-8 {
+            if ray.origin.z < self.min.z || ray.origin.z > self.max.z {
+                return None;
+            }
+        } else {
+            let inv_d = 1.0 / ray.direction.z;
+            let mut t0 = (self.min.z - ray.origin.z) * inv_d;
+            let mut t1 = (self.max.z - ray.origin.z) * inv_d;
+            let mut n = Vec3::new(0.0, 0.0, -1.0);
+            if t0 > t1 {
+                std::mem::swap(&mut t0, &mut t1);
+                n = Vec3::new(0.0, 0.0, 1.0);
+            }
+            if t0 > tmin {
+                tmin = t0;
+                normal = n;
+            }
+            if t1 < tmax {
+                tmax = t1;
+            }
+            if tmin > tmax {
+                return None;
+            }
         }
 
-        if tymin > tmin {
-            tmin = tymin;
-            normal = y_normal;
-        }
-
-        if tymax < tmax {
-            tmax = tymax;
-        }
-
-        let mut tzmin = (self.min.z - ray.origin.z) / ray.direction.z;
-        let mut tzmax = (self.max.z - ray.origin.z) / ray.direction.z;
-        let mut z_normal = Vec3::new(0.0, 0.0, -1.0);
-
-        if tzmin > tzmax {
-            std::mem::swap(&mut tzmin, &mut tzmax);
-            z_normal = Vec3::new(0.0, 0.0, 1.0);
-        }
-
-        if (tmin > tzmax) || (tzmin > tmax) {
-            return None;
-        }
-
-        if tzmin > tmin {
-            tmin = tzmin;
-            normal = z_normal;
-        }
-
-        if tmin < 0.0 {
+        if tmax < 0.0 || tmin < 0.0 {
             return None;
         }
 

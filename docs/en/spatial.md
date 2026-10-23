@@ -45,7 +45,7 @@ pub enum Projection {
 ```
 
 ### Key `Camera` Methods:
-- `Camera::perspective(fov_y_deg, aspect, z_near, z_far)` — Constructs a perspective camera with field-of-view in degrees.
+- `Camera::perspective(fov_y_deg, z_near, z_far)` — Constructs a perspective camera with field-of-view in degrees.
 - `Camera::orthographic(width, height, z_near, z_far)` — Constructs an orthographic camera with specified view bounds.
 - `look_at(eye: Vec3, target: Vec3, up: Vec3)` — Computes rotation and position to orient the camera toward a target.
 - `view_matrix() -> Mat4` — Returns right-handed view matrix (inverse of camera's world transform).
@@ -110,6 +110,8 @@ scene.attach_child(parent_id, mesh_id);
 ### Scene Operations:
 - `scene.update(ctx, dt)` — Updates world transform matrices and runs attached `NodeBehavior` callbacks.
 - `scene.render(ctx)` — Submits 3D mesh, 2D surface, and 2D text render passes.
+- `scene.despawn_node(id)` — Removes a node and all of its recursive children, cleanly detaching from its parent.
 - `scene.check_intersection(id_a, id_b)` — Evaluates geometric overlap between node colliders.
 - `scene.resolve_penetration(id_a, id_b, &contact)` — Kinematically separates intersecting nodes.
 - `scene.raycast(&ray)` — Performs closest-hit raycasting through all colliders in the scene.
+

@@ -46,6 +46,13 @@ typedef struct {
     OxideVec3 point;
 } OxideContact;
 
+typedef struct {
+    uint64_t node_id;
+    float distance;
+    OxideVec3 point;
+    OxideVec3 normal;
+} OxideRaycastHit;
+
 // Opaque Engine Types
 typedef struct OxideApp OxideApp;
 typedef struct OxideContext OxideContext;
@@ -73,6 +80,21 @@ void oxide_context_clear(OxideContext* ctx, OxideColor color);
 float oxide_context_get_fps(OxideContext* ctx);
 float oxide_context_get_delta_time(OxideContext* ctx);
 float oxide_context_get_aspect_ratio(OxideContext* ctx);
+uint32_t oxide_context_get_width(OxideContext* ctx);
+uint32_t oxide_context_get_height(OxideContext* ctx);
+
+// Context Input & Cursor API
+bool oxide_context_is_key_down(OxideContext* ctx, const char* key_name);
+bool oxide_context_is_key_just_pressed(OxideContext* ctx, const char* key_name);
+bool oxide_context_is_key_just_released(OxideContext* ctx, const char* key_name);
+bool oxide_context_is_mouse_button_down(OxideContext* ctx, uint32_t button);
+bool oxide_context_is_mouse_button_just_pressed(OxideContext* ctx, uint32_t button);
+bool oxide_context_is_mouse_button_just_released(OxideContext* ctx, uint32_t button);
+void oxide_context_get_mouse_position(OxideContext* ctx, OxideVec2* out_pos);
+void oxide_context_get_mouse_delta(OxideContext* ctx, OxideVec2* out_delta);
+void oxide_context_get_mouse_wheel(OxideContext* ctx, OxideVec2* out_wheel);
+void oxide_context_set_cursor_visible(OxideContext* ctx, bool visible);
+bool oxide_context_set_cursor_grab(OxideContext* ctx, bool grab);
 
 // Scene & Node Graph API
 OxideScene* oxide_scene_create(void);
@@ -87,19 +109,41 @@ void oxide_scene_set_camera_perspective(
     OxideVec3 eye,
     OxideVec3 target
 );
+void oxide_scene_set_camera_look_at(OxideScene* scene, OxideVec3 eye, OxideVec3 target, OxideVec3 up);
+void oxide_scene_set_light(OxideScene* scene, OxideVec3 direction, OxideVec3 color, OxideVec3 ambient);
 
+// Node Spawning
 uint64_t oxide_scene_spawn_cube_3d(OxideScene* scene, float size, OxideTransform transform);
+uint64_t oxide_scene_spawn_cube_3d_colored(OxideScene* scene, float size, OxideColor color, OxideTransform transform);
 uint64_t oxide_scene_spawn_sphere_3d(OxideScene* scene, float radius, OxideTransform transform);
+uint64_t oxide_scene_spawn_sphere_3d_colored(OxideScene* scene, float radius, OxideColor color, OxideTransform transform);
+uint64_t oxide_scene_spawn_box_3d(OxideScene* scene, float width, float height, float depth, OxideColor color, OxideTransform transform, bool is_static);
 uint64_t oxide_scene_spawn_surface_2d(OxideScene* scene, OxideVec2 size, OxideColor color, OxideTransform transform);
 uint64_t oxide_scene_spawn_text_2d(OxideScene* scene, const char* text, OxideColor color, float scale, OxideTransform transform);
 
-void oxide_scene_node_set_text(OxideScene* scene, uint64_t node_id, const char* text);
+// Node Manipulation
+bool oxide_scene_despawn_node(OxideScene* scene, uint64_t node_id);
+bool oxide_scene_node_get_transform(OxideScene* scene, uint64_t node_id, OxideTransform* out_transform);
+bool oxide_scene_node_set_transform(OxideScene* scene, uint64_t node_id, OxideTransform transform);
+bool oxide_scene_node_get_translation(OxideScene* scene, uint64_t node_id, OxideVec3* out_translation);
+bool oxide_scene_node_set_translation(OxideScene* scene, uint64_t node_id, OxideVec3 translation);
+bool oxide_scene_node_get_rotation(OxideScene* scene, uint64_t node_id, OxideQuat* out_rotation);
+bool oxide_scene_node_set_rotation(OxideScene* scene, uint64_t node_id, OxideQuat rotation);
 void oxide_scene_node_rotate_y(OxideScene* scene, uint64_t node_id, float rad);
 void oxide_scene_node_rotate_x(OxideScene* scene, uint64_t node_id, float rad);
+void oxide_scene_node_rotate_z(OxideScene* scene, uint64_t node_id, float rad);
+bool oxide_scene_node_set_scale(OxideScene* scene, uint64_t node_id, OxideVec3 scale);
+bool oxide_scene_node_set_color(OxideScene* scene, uint64_t node_id, OxideColor color);
+bool oxide_scene_node_set_visible(OxideScene* scene, uint64_t node_id, bool visible);
+bool oxide_scene_node_set_static(OxideScene* scene, uint64_t node_id, bool is_static);
+void oxide_scene_node_set_text(OxideScene* scene, uint64_t node_id, const char* text);
 
+// Collision & Raycasting
 bool oxide_scene_check_collision(OxideScene* scene, uint64_t node_a, uint64_t node_b, OxideContact* out_contact);
 void oxide_scene_resolve_penetration(OxideScene* scene, uint64_t node_a, uint64_t node_b, const OxideContact* contact);
+bool oxide_scene_raycast(OxideScene* scene, OxideVec3 origin, OxideVec3 direction, OxideRaycastHit* out_hit);
 
+// Scene Lifecycle
 void oxide_scene_update(OxideScene* scene, OxideContext* ctx, float dt);
 void oxide_scene_render(OxideScene* scene, OxideContext* ctx);
 
@@ -108,3 +152,4 @@ void oxide_scene_render(OxideScene* scene, OxideContext* ctx);
 #endif
 
 #endif // OXIDE_H
+

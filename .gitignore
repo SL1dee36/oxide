@@ -16,7 +16,9 @@ target/
 
 # Python artifacts
 __pycache__/
+*.pyc
 *.py[cod]
+
 *$py.class
 .pytest_cache/
 *.pyo

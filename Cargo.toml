@@ -17,15 +17,18 @@ categories = ["rendering", "game-engines", "simulation"]
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-winit = "0.29"
-glutin = "0.31"
-glutin-winit = "0.4"
-raw-window-handle = "0.5"
-glow = "0.13"
-glam = "0.28"
+winit = "0.30"
+glutin = "0.32"
+glutin-winit = "0.5"
+raw-window-handle = "0.6"
+glow = "0.16"
+glam = "0.29"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 tobj = { version = "4.0", default-features = false }
 fontdue = "0.9"
-thiserror = "1.0"
+thiserror = "2.0"
 log = "0.4"
 env_logger = "0.11"
+bytemuck = { version = "1.21", features = ["derive"] }
+slotmap = "1.0"
+

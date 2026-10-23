@@ -1,9 +1,10 @@
+use bytemuck::{Pod, Zeroable};
 use crate::core::error::OxideError;
 use glow::HasContext;
 
 /// Memory layout for 3D polygon vertices containing position, normal, and texture coordinates.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 pub struct Vertex3D {
     /// Spatial Cartesian coordinates `[x, y, z]`.
     pub position: [f32; 3],
@@ -72,16 +73,13 @@ pub struct VertexBuffer {
 
 impl VertexBuffer {
     /// Allocates and uploads vertex data into a GPU buffer with `STATIC_DRAW` usage.
-    pub fn new<T>(gl: &glow::Context, data: &[T]) -> Result<Self, OxideError> {
+    pub fn new<T: Pod + Zeroable>(gl: &glow::Context, data: &[T]) -> Result<Self, OxideError> {
         unsafe {
             let id = gl
                 .create_buffer()
                 .map_err(|e| OxideError::ContextError(e.to_string()))?;
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(id));
-            let slice = std::slice::from_raw_parts(
-                data.as_ptr() as *const u8,
-                std::mem::size_of_val(data),
-            );
+            let slice = bytemuck::cast_slice(data);
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice, glow::STATIC_DRAW);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
 
@@ -89,6 +87,35 @@ impl VertexBuffer {
                 id,
                 count: data.len(),
             })
+        }
+    }
+
+    /// Allocates and uploads vertex data into a GPU buffer with `DYNAMIC_DRAW` usage.
+    pub fn new_dynamic<T: Pod + Zeroable>(gl: &glow::Context, data: &[T]) -> Result<Self, OxideError> {
+        unsafe {
+            let id = gl
+                .create_buffer()
+                .map_err(|e| OxideError::ContextError(e.to_string()))?;
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(id));
+            let slice = bytemuck::cast_slice(data);
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice, glow::DYNAMIC_DRAW);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+
+            Ok(Self {
+                id,
+                count: data.len(),
+            })
+        }
+    }
+
+    /// Updates existing buffer data with `DYNAMIC_DRAW` usage.
+    pub fn update<T: Pod + Zeroable>(&mut self, gl: &glow::Context, data: &[T]) {
+        unsafe {
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.id));
+            let slice = bytemuck::cast_slice(data);
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice, glow::DYNAMIC_DRAW);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+            self.count = data.len();
         }
     }
 
@@ -129,17 +156,14 @@ pub struct IndexBuffer {
 }
 
 impl IndexBuffer {
-    /// Allocates and uploads index data into a GPU buffer.
+    /// Allocates and uploads index data into a GPU buffer with `STATIC_DRAW` usage.
     pub fn new(gl: &glow::Context, indices: &[u32]) -> Result<Self, OxideError> {
         unsafe {
             let id = gl
                 .create_buffer()
                 .map_err(|e| OxideError::ContextError(e.to_string()))?;
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(id));
-            let slice = std::slice::from_raw_parts(
-                indices.as_ptr() as *const u8,
-                std::mem::size_of_val(indices),
-            );
+            let slice = bytemuck::cast_slice(indices);
             gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, slice, glow::STATIC_DRAW);
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
 
@@ -147,6 +171,35 @@ impl IndexBuffer {
                 id,
                 count: indices.len(),
             })
+        }
+    }
+
+    /// Allocates and uploads index data into a GPU buffer with `DYNAMIC_DRAW` usage.
+    pub fn new_dynamic(gl: &glow::Context, indices: &[u32]) -> Result<Self, OxideError> {
+        unsafe {
+            let id = gl
+                .create_buffer()
+                .map_err(|e| OxideError::ContextError(e.to_string()))?;
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(id));
+            let slice = bytemuck::cast_slice(indices);
+            gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, slice, glow::DYNAMIC_DRAW);
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
+
+            Ok(Self {
+                id,
+                count: indices.len(),
+            })
+        }
+    }
+
+    /// Updates existing index buffer data with `DYNAMIC_DRAW` usage.
+    pub fn update(&mut self, gl: &glow::Context, indices: &[u32]) {
+        unsafe {
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.id));
+            let slice = bytemuck::cast_slice(indices);
+            gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, slice, glow::DYNAMIC_DRAW);
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
+            self.count = indices.len();
         }
     }
 
@@ -179,3 +232,4 @@ impl IndexBuffer {
         }
     }
 }
+

@@ -188,6 +188,32 @@ impl Scene {
         }
     }
 
+    /// Despawns a node and cleanly detaches it from its parent, recursively despawning all children.
+    /// Sets the node slot to `None` and returns `true` if the node existed, or `false` otherwise.
+    pub fn despawn_node(&mut self, id: NodeId) -> bool {
+        if id.0 >= self.nodes.len() || self.nodes[id.0].is_none() {
+            return false;
+        }
+
+        // Cleanly detach from parent if present
+        if let Some(parent_id) = self.nodes[id.0].as_ref().and_then(|n| n.parent) {
+            if let Some(parent) = self.nodes.get_mut(parent_id.0).and_then(|n| n.as_mut()) {
+                parent.children.retain(|&c| c != id);
+            }
+        }
+
+        self.despawn_node_recursive(id);
+        true
+    }
+
+    fn despawn_node_recursive(&mut self, id: NodeId) {
+        if let Some(node) = self.nodes.get_mut(id.0).and_then(|opt| opt.take()) {
+            for child_id in node.children {
+                self.despawn_node_recursive(child_id);
+            }
+        }
+    }
+
     /// Safely retrieves an optional immutable reference to the node with identifier `id`.
     pub fn get_node(&self, id: NodeId) -> Option<&SpatialNode> {
         self.nodes.get(id.0).and_then(|opt| opt.as_ref())
@@ -230,15 +256,19 @@ impl Scene {
     }
 
     fn propagate_transform(&mut self, current_id: NodeId, parent_global: Mat4) {
-        let (global, children) = if let Some(node) = self.nodes[current_id.0].as_mut() {
+        let (global, child_count) = if let Some(node) = self.nodes.get_mut(current_id.0).and_then(|opt| opt.as_mut()) {
             let global = parent_global * node.transform.matrix();
             node.global_transform = global;
-            (global, node.children.clone())
+            (global, node.children.len())
         } else {
             return;
         };
 
-        for child_id in children {
+        for i in 0..child_count {
+            let child_id = match self.nodes.get(current_id.0).and_then(|opt| opt.as_ref()) {
+                Some(node) if i < node.children.len() => node.children[i],
+                _ => break,
+            };
             self.propagate_transform(child_id, global);
         }
     }
@@ -261,13 +291,17 @@ impl Scene {
 
     /// Executes the multi-pass frame rendering pipeline (3D meshes, 2D surfaces, and 2D text overlay).
     pub fn render(&mut self, ctx: &mut Context) {
-        self.update_transforms();
-
         if self.pipeline_3d.is_none() {
-            self.pipeline_3d = Pipeline3D::new(ctx.gl).ok();
+            match Pipeline3D::new(ctx.gl) {
+                Ok(p) => self.pipeline_3d = Some(p),
+                Err(e) => log::error!("Failed to initialize Pipeline3D: {}", e),
+            }
         }
         if self.pipeline_2d.is_none() {
-            self.pipeline_2d = Pipeline2D::new(ctx.gl).ok();
+            match Pipeline2D::new(ctx.gl) {
+                Ok(p) => self.pipeline_2d = Some(p),
+                Err(e) => log::error!("Failed to initialize Pipeline2D: {}", e),
+            }
         }
 
         // Phase 1: 3D Render Pass
@@ -310,16 +344,17 @@ impl Scene {
                 }
 
                 if let NodeKind::Surface2D(ref surface) = node.kind {
-                    let pos = node.transform.translation;
-                    let scale = Vec3::new(
-                        node.transform.scale.x * surface.size.x,
-                        node.transform.scale.y * surface.size.y,
+                    let global = node.global_matrix();
+                    let (scale, rot, trans) = global.to_scale_rotation_translation();
+                    let final_scale = Vec3::new(
+                        scale.x * surface.size.x,
+                        scale.y * surface.size.y,
                         1.0,
                     );
                     let model_2d = Mat4::from_scale_rotation_translation(
-                        scale,
-                        node.transform.rotation,
-                        Vec3::new(pos.x, pos.y, 0.0),
+                        final_scale,
+                        rot,
+                        Vec3::new(trans.x, trans.y, 0.0),
                     );
                     p2d.draw(ctx.gl, &model_2d, surface.color, None);
                 }
@@ -329,13 +364,18 @@ impl Scene {
 
         // Phase 3: Text Render Pass (Overlay)
         if self.pipeline_text.is_none() {
-            self.pipeline_text = PipelineText::new(ctx.gl).ok();
+            match PipelineText::new(ctx.gl) {
+                Ok(p) => self.pipeline_text = Some(p),
+                Err(e) => log::error!("Failed to initialize PipelineText: {}", e),
+            }
         }
         if self.font_atlas.is_none() {
-            if let Ok(font) = Font::default_font() {
-                if let Ok(atlas) = FontAtlas::new(ctx.gl, font, 24.0) {
-                    self.font_atlas = Some(Arc::new(atlas));
-                }
+            match Font::default_font() {
+                Ok(font) => match FontAtlas::new(ctx.gl, font, 24.0) {
+                    Ok(atlas) => self.font_atlas = Some(Arc::new(atlas)),
+                    Err(e) => log::error!("Failed to initialize FontAtlas: {}", e),
+                },
+                Err(e) => log::error!("Failed to load default font: {}", e),
             }
         }
 
@@ -348,9 +388,11 @@ impl Scene {
                 }
 
                 if let NodeKind::Text2D(ref text) = node.kind {
-                    let pos = Vec2::new(node.transform.translation.x, node.transform.translation.y);
-                    let scale = text.scale * node.transform.scale.x;
-                    let _ = ptext.draw_text(ctx.gl, atlas, &text.content, pos, text.color, scale);
+                    let global = node.global_matrix();
+                    let (scale, _rot, trans) = global.to_scale_rotation_translation();
+                    let pos = Vec2::new(trans.x, trans.y);
+                    let final_scale = text.scale * scale.x;
+                    let _ = ptext.draw_text(ctx.gl, atlas, &text.content, pos, text.color, final_scale);
                 }
             }
             ptext.end(ctx.gl);
@@ -359,8 +401,8 @@ impl Scene {
 
     /// Evaluates geometric intersection between colliders of two nodes.
     pub fn check_intersection(&self, a_id: NodeId, b_id: NodeId) -> Option<ContactManifold> {
-        let node_a = self.node(a_id);
-        let node_b = self.node(b_id);
+        let node_a = self.get_node(a_id)?;
+        let node_b = self.get_node(b_id)?;
 
         let col_a = node_a.collider.as_ref()?;
         let col_b = node_b.collider.as_ref()?;
@@ -377,29 +419,35 @@ impl Scene {
             (Collider::Sphere { radius: ra }, Collider::Sphere { radius: rb }) => {
                 let pos_a = mat_a.transform_point3(Vec3::ZERO);
                 let pos_b = mat_b.transform_point3(Vec3::ZERO);
-                let sphere_a = BoundingSphere::new(pos_a, *ra);
-                let sphere_b = BoundingSphere::new(pos_b, *rb);
+                let (scale_a, _, _) = mat_a.to_scale_rotation_translation();
+                let (scale_b, _, _) = mat_b.to_scale_rotation_translation();
+                let max_scale_a = scale_a.x.abs().max(scale_a.y.abs()).max(scale_a.z.abs());
+                let max_scale_b = scale_b.x.abs().max(scale_b.y.abs()).max(scale_b.z.abs());
+                let sphere_a = BoundingSphere::new(pos_a, *ra * max_scale_a);
+                let sphere_b = BoundingSphere::new(pos_b, *rb * max_scale_b);
                 sphere_a.contact(&sphere_b)
             }
             (Collider::Box2D { half_extents: ha }, Collider::Box2D { half_extents: hb }) => {
-                let pos_a = node_a.transform.translation.truncate();
-                let scale_a = node_a.transform.scale.truncate();
-                let pos_b = node_b.transform.translation.truncate();
-                let scale_b = node_b.transform.scale.truncate();
-                let aabb_a = Aabb2D::from_center_half_extents(pos_a, *ha * scale_a);
-                let aabb_b = Aabb2D::from_center_half_extents(pos_b, *hb * scale_b);
+                let (scale_a, _, trans_a) = mat_a.to_scale_rotation_translation();
+                let (scale_b, _, trans_b) = mat_b.to_scale_rotation_translation();
+                let aabb_a = Aabb2D::from_center_half_extents(trans_a.truncate(), *ha * scale_a.truncate());
+                let aabb_b = Aabb2D::from_center_half_extents(trans_b.truncate(), *hb * scale_b.truncate());
                 aabb_a.contact(&aabb_b)
             }
             (Collider::Box3D { half_extents: h }, Collider::Sphere { radius: r }) => {
                 let aabb = Aabb3D::from_center_half_extents(Vec3::ZERO, *h).transform(&mat_a);
                 let pos_sphere = mat_b.transform_point3(Vec3::ZERO);
-                let sphere = BoundingSphere::new(pos_sphere, *r);
+                let (scale_b, _, _) = mat_b.to_scale_rotation_translation();
+                let max_scale_b = scale_b.x.abs().max(scale_b.y.abs()).max(scale_b.z.abs());
+                let sphere = BoundingSphere::new(pos_sphere, *r * max_scale_b);
                 aabb.contact_sphere(&sphere)
             }
             (Collider::Sphere { radius: r }, Collider::Box3D { half_extents: h }) => {
                 let aabb = Aabb3D::from_center_half_extents(Vec3::ZERO, *h).transform(&mat_b);
                 let pos_sphere = mat_a.transform_point3(Vec3::ZERO);
-                let sphere = BoundingSphere::new(pos_sphere, *r);
+                let (scale_a, _, _) = mat_a.to_scale_rotation_translation();
+                let max_scale_a = scale_a.x.abs().max(scale_a.y.abs()).max(scale_a.z.abs());
+                let sphere = BoundingSphere::new(pos_sphere, *r * max_scale_a);
                 if let Some(mut contact) = aabb.contact_sphere(&sphere) {
                     contact.normal = -contact.normal;
                     Some(contact)
@@ -407,41 +455,27 @@ impl Scene {
                     None
                 }
             }
-            (Collider::Box3D { half_extents: h3d }, Collider::Box2D { half_extents: h2d }) => {
-                let pos_3d = mat_a.transform_point3(Vec3::ZERO);
-                let pos_2d = Vec3::new(node_b.transform.translation.x, node_b.transform.translation.y, 0.0);
-                let aabb_a = Aabb3D::from_center_half_extents(pos_3d, *h3d);
-                let aabb_b = Aabb3D::from_center_half_extents(pos_2d, Vec3::new(h2d.x, h2d.y, 10.0));
-                aabb_a.contact(&aabb_b)
-            }
-            (Collider::Box2D { half_extents: h2d }, Collider::Box3D { half_extents: h3d }) => {
-                let pos_2d = Vec3::new(node_a.transform.translation.x, node_a.transform.translation.y, 0.0);
-                let pos_3d = mat_b.transform_point3(Vec3::ZERO);
-                let aabb_a = Aabb3D::from_center_half_extents(pos_2d, Vec3::new(h2d.x, h2d.y, 10.0));
-                let aabb_b = Aabb3D::from_center_half_extents(pos_3d, *h3d);
-                aabb_a.contact(&aabb_b)
-            }
             _ => None,
         }
     }
 
     /// Kinematically separates two overlapping nodes along the contact normal taking `is_static` into account.
     pub fn resolve_penetration(&mut self, a_id: NodeId, b_id: NodeId, contact: &ContactManifold) {
-        if a_id == b_id {
+        if a_id == b_id || a_id.0 >= self.nodes.len() || b_id.0 >= self.nodes.len() {
             return;
         }
         let (node_a, node_b) = if a_id.0 < b_id.0 {
             let (left, right) = self.nodes.split_at_mut(b_id.0);
-            (
-                left[a_id.0].as_mut().unwrap(),
-                right[0].as_mut().unwrap(),
-            )
+            match (&mut left[a_id.0], &mut right[0]) {
+                (Some(a), Some(b)) => (a, b),
+                _ => return,
+            }
         } else {
             let (left, right) = self.nodes.split_at_mut(a_id.0);
-            (
-                right[0].as_mut().unwrap(),
-                left[b_id.0].as_mut().unwrap(),
-            )
+            match (&mut right[0], &mut left[b_id.0]) {
+                (Some(a), Some(b)) => (a, b),
+                _ => return,
+            }
         };
 
         resolve_penetration_weighted(
@@ -451,8 +485,12 @@ impl Scene {
             node_b.is_static,
             contact,
         );
-        node_a.global_transform = node_a.transform.matrix();
-        node_b.global_transform = node_b.transform.matrix();
+        if node_a.parent.is_none() {
+            node_a.global_transform = node_a.transform.matrix();
+        }
+        if node_b.parent.is_none() {
+            node_b.global_transform = node_b.transform.matrix();
+        }
     }
 
     /// Casts a ray through the scene, returning the closest intersecting node and hit information.
@@ -472,7 +510,9 @@ impl Scene {
                     }
                     Collider::Sphere { radius } => {
                         let pos = node.global_transform.transform_point3(Vec3::ZERO);
-                        let sphere = BoundingSphere::new(pos, *radius);
+                        let (scale, _, _) = node.global_transform.to_scale_rotation_translation();
+                        let max_scale = scale.x.abs().max(scale.y.abs()).max(scale.z.abs());
+                        let sphere = BoundingSphere::new(pos, *radius * max_scale);
                         sphere.raycast(ray)
                     }
                     _ => None,

@@ -113,6 +113,15 @@ _dll.oxide_context_get_delta_time.restype = c_float
 _dll.oxide_context_get_aspect_ratio.argtypes = [c_void_p]
 _dll.oxide_context_get_aspect_ratio.restype = c_float
 
+_dll.oxide_context_get_width.argtypes = [c_void_p]
+_dll.oxide_context_get_width.restype = c_uint32
+
+_dll.oxide_context_get_height.argtypes = [c_void_p]
+_dll.oxide_context_get_height.restype = c_uint32
+
+_dll.oxide_scene_despawn_node.argtypes = [c_void_p, c_uint64]
+_dll.oxide_scene_despawn_node.restype = c_bool
+
 _dll.oxide_context_is_key_down.argtypes = [c_void_p, c_char_p]
 _dll.oxide_context_is_key_down.restype = c_bool
 
@@ -462,11 +471,11 @@ class Context:
 
     @property
     def width(self):
-        return 1280
+        return _dll.oxide_context_get_width(self._ptr)
 
     @property
     def height(self):
-        return 720
+        return _dll.oxide_context_get_height(self._ptr)
 
     def is_key_down(self, key_name: str) -> bool:
         return _dll.oxide_context_is_key_down(self._ptr, key_name.encode("utf-8"))
@@ -520,6 +529,10 @@ class Scene:
         if hasattr(self, "_ptr") and self._ptr:
             _dll.oxide_scene_destroy(self._ptr)
             self._ptr = None
+
+    def despawn_node(self, node_id: int) -> bool:
+        """Removes and despawns a node and all of its recursive children from the scene."""
+        return _dll.oxide_scene_despawn_node(self._ptr, node_id)
 
     def __enter__(self):
         return self

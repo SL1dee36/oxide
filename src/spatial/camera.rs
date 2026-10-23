@@ -38,7 +38,7 @@ pub struct Camera {
 
 impl Camera {
     /// Constructs a perspective camera with vertical field of view specified in degrees.
-    pub fn perspective(fov_y_deg: f32, _aspect: f32, z_near: f32, z_far: f32) -> Self {
+    pub fn perspective(fov_y_deg: f32, z_near: f32, z_far: f32) -> Self {
         Self {
             transform: Transform::IDENTITY,
             projection: Projection::Perspective {
@@ -106,6 +106,6 @@ impl Camera {
 
 impl Default for Camera {
     fn default() -> Self {
-        Self::perspective(60.0, 16.0 / 9.0, 0.1, 1000.0)
+        Self::perspective(60.0, 0.1, 1000.0)
     }
 }

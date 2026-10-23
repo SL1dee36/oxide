@@ -35,7 +35,7 @@ void main() {
 "#;
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct TextVertex {
     position: [f32; 2],
     uv: [f32; 2],
@@ -44,15 +44,44 @@ struct TextVertex {
 /// Specialized graphics pipeline for rendering batched 2D text quads from a glyph texture atlas.
 pub struct PipelineText {
     shader: ShaderProgram,
+    vao: VertexArray,
+    vbo: VertexBuffer,
+    ebo: IndexBuffer,
     projection: Mat4,
 }
 
 impl PipelineText {
-    /// Compiles text vertex and fragment shaders.
+    /// Compiles text vertex and fragment shaders and allocates dynamic geometry buffers.
     pub fn new(gl: &glow::Context) -> Result<Self, OxideError> {
         let shader = ShaderProgram::new(gl, VERTEX_SHADER_TEXT, FRAGMENT_SHADER_TEXT)?;
+        let vao = VertexArray::new(gl)?;
+        let vbo = VertexBuffer::new_dynamic(gl, &[] as &[TextVertex])?;
+        let ebo = IndexBuffer::new_dynamic(gl, &[] as &[u32])?;
+
+        vao.bind(gl);
+        vbo.bind(gl);
+        ebo.bind(gl);
+
+        unsafe {
+            let stride = std::mem::size_of::<TextVertex>() as i32;
+
+            gl.enable_vertex_attrib_array(0);
+            gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
+
+            gl.enable_vertex_attrib_array(1);
+            let uv_offset = 2 * std::mem::size_of::<f32>() as i32;
+            gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, stride, uv_offset);
+        }
+
+        vao.unbind(gl);
+        vbo.unbind(gl);
+        ebo.unbind(gl);
+
         Ok(Self {
             shader,
+            vao,
+            vbo,
+            ebo,
             projection: Mat4::IDENTITY,
         })
     }
@@ -81,7 +110,7 @@ impl PipelineText {
 
     /// Batches characters from `text` into quad vertices and submits a single draw call.
     pub fn draw_text(
-        &self,
+        &mut self,
         gl: &glow::Context,
         atlas: &FontAtlas,
         text: &str,
@@ -156,39 +185,21 @@ impl PipelineText {
         self.shader.set_vec4(gl, "u_color", color.to_vec4());
         atlas.texture.bind(gl, 0);
 
-        let vao = VertexArray::new(gl)?;
-        let vbo = VertexBuffer::new(gl, &vertices)?;
-        let ebo = IndexBuffer::new(gl, &indices)?;
+        self.vbo.update(gl, &vertices);
+        self.ebo.update(gl, &indices);
 
-        vao.bind(gl);
-        vbo.bind(gl);
-        ebo.bind(gl);
-
+        self.vao.bind(gl);
+        self.ebo.bind(gl);
         unsafe {
-            let stride = std::mem::size_of::<TextVertex>() as i32;
-
-            gl.enable_vertex_attrib_array(0);
-            gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
-
-            gl.enable_vertex_attrib_array(1);
-            let uv_offset = 2 * std::mem::size_of::<f32>() as i32;
-            gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, stride, uv_offset);
-
             gl.draw_elements(
                 glow::TRIANGLES,
-                ebo.count() as i32,
+                self.ebo.count() as i32,
                 glow::UNSIGNED_INT,
                 0,
             );
         }
-
-        ebo.unbind(gl);
-        vbo.unbind(gl);
-        vao.unbind(gl);
-
-        ebo.destroy(gl);
-        vbo.destroy(gl);
-        vao.destroy(gl);
+        self.vao.unbind(gl);
+        self.ebo.unbind(gl);
 
         Ok(())
     }
@@ -202,8 +213,11 @@ impl PipelineText {
         }
     }
 
-    /// Deallocates pipeline shaders from GPU memory.
+    /// Deallocates pipeline shaders and geometry buffers from GPU memory.
     pub fn destroy(&self, gl: &glow::Context) {
+        self.ebo.destroy(gl);
+        self.vbo.destroy(gl);
+        self.vao.destroy(gl);
         self.shader.destroy(gl);
     }
 }

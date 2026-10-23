@@ -12,6 +12,7 @@ include = [
     "OxideColor",
     "OxideTransform",
     "OxideContact",
+    "OxideRaycastHit",
     "OxideApp",
     "OxideContext",
     "OxideScene",

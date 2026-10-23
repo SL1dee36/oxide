@@ -32,8 +32,9 @@ fn test_obj_loader_from_memory() {
 fn test_obj_loader_corrupted_data() {
     let invalid_data = b"NOT_AN_OBJ_DATA_JUST_GARBAGE";
     let res = load_obj_from_memory(invalid_data);
-    // Even if tobj doesn't panic on empty models, let's verify empty or handled result
-    assert!(res.is_ok() || res.is_err());
+    let mesh = res.expect("Corrupted data with no OBJ tokens yields an empty mesh without panicking");
+    assert!(mesh.vertices.is_empty(), "Corrupted data should produce no vertices");
+    assert!(mesh.indices.is_empty(), "Corrupted data should produce no indices");
 }
 
 #[test]
