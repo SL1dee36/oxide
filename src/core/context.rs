@@ -7,6 +7,8 @@ use glow::HasContext;
 pub struct Context<'a> {
     /// Underlying OpenGL 3.3 Core interface.
     pub gl: &'a glow::Context,
+    /// Reference to OS window.
+    pub window: &'a winit::window::Window,
     /// Physical viewport width in pixels.
     pub width: u32,
     /// Physical viewport height in pixels.
@@ -21,6 +23,7 @@ impl<'a> Context<'a> {
     /// Instantiates a frame execution context wrapper.
     pub fn new(
         gl: &'a glow::Context,
+        window: &'a winit::window::Window,
         width: u32,
         height: u32,
         time: &'a Time,
@@ -28,11 +31,38 @@ impl<'a> Context<'a> {
     ) -> Self {
         Self {
             gl,
+            window,
             width,
             height,
             time,
             input,
         }
+    }
+
+    /// Sets OS mouse cursor visibility.
+    #[inline]
+    pub fn set_cursor_visible(&self, visible: bool) {
+        self.window.set_cursor_visible(visible);
+    }
+
+    /// Configures OS mouse cursor grab/lock mode.
+    #[inline]
+    pub fn set_cursor_grab(&self, grab: bool) -> bool {
+        let mode = if grab {
+            winit::window::CursorGrabMode::Locked
+        } else {
+            winit::window::CursorGrabMode::None
+        };
+        self.window
+            .set_cursor_grab(mode)
+            .or_else(|_| {
+                self.window.set_cursor_grab(if grab {
+                    winit::window::CursorGrabMode::Confined
+                } else {
+                    winit::window::CursorGrabMode::None
+                })
+            })
+            .is_ok()
     }
 
     /// Calculates viewport aspect ratio (`width / height`).

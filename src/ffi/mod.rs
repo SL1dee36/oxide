@@ -23,6 +23,8 @@ use crate::assets::mesh::Mesh3D;
 use crate::assets::surface::Surface2D;
 use crate::collision::collider::Collider;
 use crate::collision::manifold::ContactManifold;
+use crate::collision::ray::Ray3D;
+use crate::core::input::{KeyCode, MouseButton};
 use glam::{Quat, Vec2, Vec3};
 use std::ffi::{c_char, c_void, CStr};
 
@@ -163,6 +165,16 @@ impl From<OxideContact> for ContactManifold {
     fn from(c: OxideContact) -> Self {
         ContactManifold::new(c.normal.into(), c.depth, c.point.into())
     }
+}
+
+/// C-compatible raycast intersection hit report.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct OxideRaycastHit {
+    pub node_id: u64,
+    pub distance: f32,
+    pub point: OxideVec3,
+    pub normal: OxideVec3,
 }
 
 /// Opaque wrapper around per-frame [`Context`].
@@ -330,6 +342,228 @@ pub unsafe extern "C" fn oxide_context_get_aspect_ratio(ctx: *mut OxideContext) 
 }
 
 // ==========================================
+// Context Input API
+// ==========================================
+
+fn parse_key_code(name: &str) -> Option<KeyCode> {
+    match name.trim().to_uppercase().as_str() {
+        "A" | "KEYA" => Some(KeyCode::KeyA),
+        "B" | "KEYB" => Some(KeyCode::KeyB),
+        "C" | "KEYC" => Some(KeyCode::KeyC),
+        "D" | "KEYD" => Some(KeyCode::KeyD),
+        "E" | "KEYE" => Some(KeyCode::KeyE),
+        "F" | "KEYF" => Some(KeyCode::KeyF),
+        "G" | "KEYG" => Some(KeyCode::KeyG),
+        "H" | "KEYH" => Some(KeyCode::KeyH),
+        "I" | "KEYI" => Some(KeyCode::KeyI),
+        "J" | "KEYJ" => Some(KeyCode::KeyJ),
+        "K" | "KEYK" => Some(KeyCode::KeyK),
+        "L" | "KEYL" => Some(KeyCode::KeyL),
+        "M" | "KEYM" => Some(KeyCode::KeyM),
+        "N" | "KEYN" => Some(KeyCode::KeyN),
+        "O" | "KEYO" => Some(KeyCode::KeyO),
+        "P" | "KEYP" => Some(KeyCode::KeyP),
+        "Q" | "KEYQ" => Some(KeyCode::KeyQ),
+        "R" | "KEYR" => Some(KeyCode::KeyR),
+        "S" | "KEYS" => Some(KeyCode::KeyS),
+        "T" | "KEYT" => Some(KeyCode::KeyT),
+        "U" | "KEYU" => Some(KeyCode::KeyU),
+        "V" | "KEYV" => Some(KeyCode::KeyV),
+        "W" | "KEYW" => Some(KeyCode::KeyW),
+        "X" | "KEYX" => Some(KeyCode::KeyX),
+        "Y" | "KEYY" => Some(KeyCode::KeyY),
+        "Z" | "KEYZ" => Some(KeyCode::KeyZ),
+        "0" | "DIGIT0" => Some(KeyCode::Digit0),
+        "1" | "DIGIT1" => Some(KeyCode::Digit1),
+        "2" | "DIGIT2" => Some(KeyCode::Digit2),
+        "3" | "DIGIT3" => Some(KeyCode::Digit3),
+        "4" | "DIGIT4" => Some(KeyCode::Digit4),
+        "5" | "DIGIT5" => Some(KeyCode::Digit5),
+        "6" | "DIGIT6" => Some(KeyCode::Digit6),
+        "7" | "DIGIT7" => Some(KeyCode::Digit7),
+        "8" | "DIGIT8" => Some(KeyCode::Digit8),
+        "9" | "DIGIT9" => Some(KeyCode::Digit9),
+        "SPACE" => Some(KeyCode::Space),
+        "ESCAPE" | "ESC" => Some(KeyCode::Escape),
+        "ENTER" | "RETURN" => Some(KeyCode::Enter),
+        "TAB" => Some(KeyCode::Tab),
+        "SHIFT" | "SHIFTLEFT" => Some(KeyCode::ShiftLeft),
+        "SHIFTRIGHT" => Some(KeyCode::ShiftRight),
+        "CONTROL" | "CONTROLLEFT" | "CTRL" => Some(KeyCode::ControlLeft),
+        "CONTROLRIGHT" => Some(KeyCode::ControlRight),
+        "ALT" | "ALTLEFT" => Some(KeyCode::AltLeft),
+        "ALTRIGHT" => Some(KeyCode::AltRight),
+        "UP" | "ARROWUP" => Some(KeyCode::ArrowUp),
+        "DOWN" | "ARROWDOWN" => Some(KeyCode::ArrowDown),
+        "LEFT" | "ARROWLEFT" => Some(KeyCode::ArrowLeft),
+        "RIGHT" | "ARROWRIGHT" => Some(KeyCode::ArrowRight),
+        _ => None,
+    }
+}
+
+fn parse_mouse_button(button: u32) -> MouseButton {
+    match button {
+        0 => MouseButton::Left,
+        1 => MouseButton::Right,
+        2 => MouseButton::Middle,
+        _ => MouseButton::Other(button as u16),
+    }
+}
+
+/// Returns `true` if physical keyboard key specified by `key_name` is currently held down.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_is_key_down(
+    ctx: *mut OxideContext,
+    key_name: *const c_char,
+) -> bool {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        if !key_name.is_null() {
+            if let Ok(name) = CStr::from_ptr(key_name).to_str() {
+                if let Some(code) = parse_key_code(name) {
+                    return c.input.is_key_down(code);
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Returns `true` if physical keyboard key transitioned to pressed state in the current frame.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_is_key_just_pressed(
+    ctx: *mut OxideContext,
+    key_name: *const c_char,
+) -> bool {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        if !key_name.is_null() {
+            if let Ok(name) = CStr::from_ptr(key_name).to_str() {
+                if let Some(code) = parse_key_code(name) {
+                    return c.input.is_key_just_pressed(code);
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Returns `true` if physical keyboard key was released during the current frame.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_is_key_just_released(
+    ctx: *mut OxideContext,
+    key_name: *const c_char,
+) -> bool {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        if !key_name.is_null() {
+            if let Ok(name) = CStr::from_ptr(key_name).to_str() {
+                if let Some(code) = parse_key_code(name) {
+                    return c.input.is_key_just_released(code);
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Returns `true` if mouse button (0: Left, 1: Right, 2: Middle) is held down.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_is_mouse_button_down(
+    ctx: *mut OxideContext,
+    button: u32,
+) -> bool {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        return c.input.is_mouse_button_down(parse_mouse_button(button));
+    }
+    false
+}
+
+/// Returns `true` if mouse button transitioned to pressed state in current frame.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_is_mouse_button_just_pressed(
+    ctx: *mut OxideContext,
+    button: u32,
+) -> bool {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        return c.input.is_mouse_button_just_pressed(parse_mouse_button(button));
+    }
+    false
+}
+
+/// Returns `true` if mouse button was released during current frame.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_is_mouse_button_just_released(
+    ctx: *mut OxideContext,
+    button: u32,
+) -> bool {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        return c.input.is_mouse_button_just_released(parse_mouse_button(button));
+    }
+    false
+}
+
+/// Retrieves the current physical cursor position in window pixels.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_get_mouse_position(
+    ctx: *mut OxideContext,
+    out_pos: *mut OxideVec2,
+) {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        if !out_pos.is_null() {
+            *out_pos = c.input.mouse_position().into();
+        }
+    }
+}
+
+/// Retrieves cursor movement delta vector in pixels accumulated during current frame.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_get_mouse_delta(
+    ctx: *mut OxideContext,
+    out_delta: *mut OxideVec2,
+) {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        if !out_delta.is_null() {
+            *out_delta = c.input.mouse_delta().into();
+        }
+    }
+}
+
+/// Retrieves scroll wheel delta accumulated during current frame.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_get_mouse_wheel(
+    ctx: *mut OxideContext,
+    out_wheel: *mut OxideVec2,
+) {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        if !out_wheel.is_null() {
+            *out_wheel = c.input.mouse_wheel_delta().into();
+        }
+    }
+}
+
+/// Sets OS mouse cursor visibility.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_set_cursor_visible(
+    ctx: *mut OxideContext,
+    visible: bool,
+) {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        c.set_cursor_visible(visible);
+    }
+}
+
+/// Configures OS mouse cursor grab/confinement mode.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_context_set_cursor_grab(
+    ctx: *mut OxideContext,
+    grab: bool,
+) -> bool {
+    if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
+        c.set_cursor_grab(grab)
+    } else {
+        false
+    }
+}
+
+// ==========================================
 // Scene Graph API
 // ==========================================
 
@@ -473,6 +707,202 @@ pub unsafe extern "C" fn oxide_scene_node_set_text(
     }
 }
 
+/// Configures directional lighting in the scene.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_set_light(
+    scene: *mut OxideScene,
+    direction: OxideVec3,
+    color: OxideVec3,
+    ambient: OxideVec3,
+) {
+    if let Some(s) = scene.as_mut() {
+        let dir: Vec3 = direction.into();
+        let col: Vec3 = color.into();
+        let amb: Vec3 = ambient.into();
+        s.inner.set_light(crate::renderer::pipeline_3d::Light3D {
+            direction: if dir.length_squared() > 1e-6 { dir.normalize() } else { Vec3::Y },
+            color: col,
+            ambient: amb,
+        });
+    }
+}
+
+/// Sets camera look-at orientation directly.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_set_camera_look_at(
+    scene: *mut OxideScene,
+    eye: OxideVec3,
+    target: OxideVec3,
+    up: OxideVec3,
+) {
+    if let Some(s) = scene.as_mut() {
+        s.inner.camera_mut().look_at(eye.into(), target.into(), up.into());
+    }
+}
+
+/// Spawns a 3D cube mesh with specific color tint.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_spawn_cube_3d_colored(
+    scene: *mut OxideScene,
+    size: f32,
+    color: OxideColor,
+    transform: OxideTransform,
+) -> u64 {
+    if let Some(s) = scene.as_mut() {
+        let mesh = Mesh3D::cube(size).with_color(color.into());
+        let id = s.inner.spawn_mesh_3d(mesh, transform.into(), Collider::box_3d(Vec3::splat(size)));
+        id.0 as u64
+    } else {
+        u64::MAX
+    }
+}
+
+/// Spawns a 3D sphere mesh with specific color tint.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_spawn_sphere_3d_colored(
+    scene: *mut OxideScene,
+    radius: f32,
+    color: OxideColor,
+    transform: OxideTransform,
+) -> u64 {
+    if let Some(s) = scene.as_mut() {
+        let mesh = Mesh3D::sphere(radius, 24, 24).with_color(color.into());
+        let id = s.inner.spawn_mesh_3d(mesh, transform.into(), Collider::sphere(radius));
+        id.0 as u64
+    } else {
+        u64::MAX
+    }
+}
+
+/// Spawns a 3D box mesh node with dimensions `(width, height, depth)` and optional static flag.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_spawn_box_3d(
+    scene: *mut OxideScene,
+    width: f32,
+    height: f32,
+    depth: f32,
+    color: OxideColor,
+    transform: OxideTransform,
+    is_static: bool,
+) -> u64 {
+    if let Some(s) = scene.as_mut() {
+        let mesh = Mesh3D::box_mesh(width, height, depth).with_color(color.into());
+        let id = if is_static {
+            s.inner.spawn_static_mesh_3d(mesh, transform.into(), Collider::box_3d(Vec3::new(width, height, depth)))
+        } else {
+            s.inner.spawn_mesh_3d(mesh, transform.into(), Collider::box_3d(Vec3::new(width, height, depth)))
+        };
+        id.0 as u64
+    } else {
+        u64::MAX
+    }
+}
+
+/// Retrieves the local transform of a spatial node.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_get_transform(
+    scene: *mut OxideScene,
+    node_id: u64,
+    out_transform: *mut OxideTransform,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node(NodeId(node_id as usize)) {
+            if !out_transform.is_null() {
+                *out_transform = node.transform.into();
+            }
+            return true;
+        }
+    }
+    false
+}
+
+/// Sets the local transform of a spatial node.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_set_transform(
+    scene: *mut OxideScene,
+    node_id: u64,
+    transform: OxideTransform,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            node.transform = transform.into();
+            node.global_transform = node.transform.matrix();
+            return true;
+        }
+    }
+    false
+}
+
+/// Gets translation position vector of a node.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_get_translation(
+    scene: *mut OxideScene,
+    node_id: u64,
+    out_translation: *mut OxideVec3,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node(NodeId(node_id as usize)) {
+            if !out_translation.is_null() {
+                *out_translation = node.transform.translation.into();
+            }
+            return true;
+        }
+    }
+    false
+}
+
+/// Sets translation position vector of a node.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_set_translation(
+    scene: *mut OxideScene,
+    node_id: u64,
+    translation: OxideVec3,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            node.transform.translation = translation.into();
+            node.global_transform = node.transform.matrix();
+            return true;
+        }
+    }
+    false
+}
+
+/// Gets rotation quaternion of a node.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_get_rotation(
+    scene: *mut OxideScene,
+    node_id: u64,
+    out_rotation: *mut OxideQuat,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node(NodeId(node_id as usize)) {
+            if !out_rotation.is_null() {
+                *out_rotation = node.transform.rotation.into();
+            }
+            return true;
+        }
+    }
+    false
+}
+
+/// Sets rotation quaternion of a node.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_set_rotation(
+    scene: *mut OxideScene,
+    node_id: u64,
+    rotation: OxideQuat,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            node.transform.rotation = rotation.into();
+            node.global_transform = node.transform.matrix();
+            return true;
+        }
+    }
+    false
+}
+
 /// Rotates node around its local Y-axis by `rad` radians.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_node_rotate_y(
@@ -481,7 +911,10 @@ pub unsafe extern "C" fn oxide_scene_node_rotate_y(
     rad: f32,
 ) {
     if let Some(s) = scene.as_mut() {
-        s.inner.node_mut(NodeId(node_id as usize)).transform.rotate_y(rad);
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            node.transform.rotate_y(rad);
+            node.global_transform = node.transform.matrix();
+        }
     }
 }
 
@@ -493,8 +926,125 @@ pub unsafe extern "C" fn oxide_scene_node_rotate_x(
     rad: f32,
 ) {
     if let Some(s) = scene.as_mut() {
-        s.inner.node_mut(NodeId(node_id as usize)).transform.rotate_x(rad);
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            node.transform.rotate_x(rad);
+            node.global_transform = node.transform.matrix();
+        }
     }
+}
+
+/// Rotates node around its local Z-axis by `rad` radians.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_rotate_z(
+    scene: *mut OxideScene,
+    node_id: u64,
+    rad: f32,
+) {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            node.transform.rotate_z(rad);
+            node.global_transform = node.transform.matrix();
+        }
+    }
+}
+
+/// Sets node scale vector.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_set_scale(
+    scene: *mut OxideScene,
+    node_id: u64,
+    scale: OxideVec3,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            node.transform.scale = scale.into();
+            node.global_transform = node.transform.matrix();
+            return true;
+        }
+    }
+    false
+}
+
+/// Sets the base color tint of an existing node.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_set_color(
+    scene: *mut OxideScene,
+    node_id: u64,
+    color: OxideColor,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            match node.kind {
+                NodeKind::Mesh3D(ref mut m) => m.color = color.into(),
+                NodeKind::Surface2D(ref mut surf) => surf.color = color.into(),
+                NodeKind::Text2D(ref mut txt) => txt.color = color.into(),
+                _ => {}
+            }
+            return true;
+        }
+    }
+    false
+}
+
+/// Sets node visibility flag.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_set_visible(
+    scene: *mut OxideScene,
+    node_id: u64,
+    visible: bool,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            node.visible = visible;
+            return true;
+        }
+    }
+    false
+}
+
+/// Sets node static obstacle flag.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_node_set_static(
+    scene: *mut OxideScene,
+    node_id: u64,
+    is_static: bool,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        if let Some(node) = s.inner.get_node_mut(NodeId(node_id as usize)) {
+            node.is_static = is_static;
+            return true;
+        }
+    }
+    false
+}
+
+/// Casts a ray through the scene, finding the closest intersecting node.
+#[no_mangle]
+pub unsafe extern "C" fn oxide_scene_raycast(
+    scene: *mut OxideScene,
+    origin: OxideVec3,
+    direction: OxideVec3,
+    out_hit: *mut OxideRaycastHit,
+) -> bool {
+    if let Some(s) = scene.as_mut() {
+        let dir: Vec3 = direction.into();
+        if dir.length_squared() > 1e-6 {
+            let ray = Ray3D::new(origin.into(), dir);
+            s.inner.update_transforms();
+            if let Some((node_id, hit)) = s.inner.raycast(&ray) {
+                if !out_hit.is_null() {
+                    *out_hit = OxideRaycastHit {
+                        node_id: node_id.0 as u64,
+                        distance: hit.distance,
+                        point: hit.point.into(),
+                        normal: hit.normal.into(),
+                    };
+                }
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Evaluates geometric intersection between colliders of `node_a` and `node_b`.

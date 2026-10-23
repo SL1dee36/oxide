@@ -49,14 +49,21 @@ impl Mesh3D {
 
     /// Generates a procedural 3D box mesh with dimension `size` centered at origin.
     pub fn cube(size: f32) -> Self {
-        let h = size * 0.5;
+        Self::box_mesh(size, size, size)
+    }
+
+    /// Generates a procedural 3D box mesh with dimensions `(width, height, depth)` centered at origin.
+    pub fn box_mesh(width: f32, height: f32, depth: f32) -> Self {
+        let hx = width * 0.5;
+        let hy = height * 0.5;
+        let hz = depth * 0.5;
         let p = [
-            [-h, -h,  h], [ h, -h,  h], [ h,  h,  h], [-h,  h,  h], // Front
-            [ h, -h, -h], [-h, -h, -h], [-h,  h, -h], [ h,  h, -h], // Back
-            [-h,  h,  h], [ h,  h,  h], [ h,  h, -h], [-h,  h, -h], // Top
-            [-h, -h, -h], [ h, -h, -h], [ h, -h,  h], [-h, -h,  h], // Bottom
-            [ h, -h,  h], [ h, -h, -h], [ h,  h, -h], [ h,  h,  h], // Right
-            [-h, -h, -h], [-h, -h,  h], [-h,  h,  h], [-h,  h, -h], // Left
+            [-hx, -hy,  hz], [ hx, -hy,  hz], [ hx,  hy,  hz], [-hx,  hy,  hz], // Front
+            [ hx, -hy, -hz], [-hx, -hy, -hz], [-hx,  hy, -hz], [ hx,  hy, -hz], // Back
+            [-hx,  hy,  hz], [ hx,  hy,  hz], [ hx,  hy, -hz], [-hx,  hy, -hz], // Top
+            [-hx, -hy, -hz], [ hx, -hy, -hz], [ hx, -hy,  hz], [-hx, -hy,  hz], // Bottom
+            [ hx, -hy,  hz], [ hx, -hy, -hz], [ hx,  hy, -hz], [ hx,  hy,  hz], // Right
+            [-hx, -hy, -hz], [-hx, -hy,  hz], [-hx,  hy,  hz], [-hx,  hy, -hz], // Left
         ];
 
         let normals = [

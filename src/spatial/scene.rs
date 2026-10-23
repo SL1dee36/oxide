@@ -113,6 +113,35 @@ impl Scene {
         id
     }
 
+    /// Spawns a 3D box mesh node with an attached box collider.
+    pub fn spawn_box_3d(
+        &mut self,
+        width: f32,
+        height: f32,
+        depth: f32,
+        transform: Transform,
+    ) -> NodeId {
+        self.spawn_node(
+            "Box3D",
+            NodeKind::Mesh3D(Mesh3D::box_mesh(width, height, depth)),
+            transform,
+            Some(Collider::box_3d(Vec3::new(width, height, depth))),
+        )
+    }
+
+    /// Spawns an immobile 3D box mesh node with `is_static = true`.
+    pub fn spawn_static_box_3d(
+        &mut self,
+        width: f32,
+        height: f32,
+        depth: f32,
+        transform: Transform,
+    ) -> NodeId {
+        let id = self.spawn_box_3d(width, height, depth, transform);
+        self.node_mut(id).is_static = true;
+        id
+    }
+
     /// Spawns a 2D planar quad surface in screen coordinates.
     pub fn spawn_surface_2d(
         &mut self,
@@ -157,6 +186,16 @@ impl Scene {
                 parent.children.push(child_id);
             }
         }
+    }
+
+    /// Safely retrieves an optional immutable reference to the node with identifier `id`.
+    pub fn get_node(&self, id: NodeId) -> Option<&SpatialNode> {
+        self.nodes.get(id.0).and_then(|opt| opt.as_ref())
+    }
+
+    /// Safely retrieves an optional mutable reference to the node with identifier `id`.
+    pub fn get_node_mut(&mut self, id: NodeId) -> Option<&mut SpatialNode> {
+        self.nodes.get_mut(id.0).and_then(|opt| opt.as_mut())
     }
 
     /// Retrieves an immutable reference to the node with identifier `id`.

@@ -84,6 +84,7 @@ impl AppBuilder {
         {
             let mut init_ctx = Context::new(
                 &window_ctx.glow_gl,
+                &window_ctx.window,
                 width,
                 height,
                 &time,
@@ -140,6 +141,7 @@ impl AppBuilder {
 
                             let mut frame_ctx = Context::new(
                                 &window_ctx.glow_gl,
+                                &window_ctx.window,
                                 width,
                                 height,
                                 &time,
