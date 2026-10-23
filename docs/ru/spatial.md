@@ -1,94 +1,115 @@
-# Модуль `spatial` — Пространственный граф сцены и узлы
+# Модуль `spatial` — Иерархический граф сцены, узлы и камеры
 
-Модуль `spatial` реализует иерархическое дерево узлов (Node Graph, аналогично архитектуре Godot), математику пространственных трансформаций (TRS) и камеры.
+Модуль `spatial` реализует иерархическое дерево узлов (Node Graph), вычисление каскадных пространственных трансформаций (TRS) и модели перспективных и ортографических камер.
 
-Исходный код: [`src/spatial/`](file:///e:/PRJCT/Oxide/src/spatial/)
+Исходный код: [`src/spatial/`](../../src/spatial/)
 
 ---
 
-## 1. Трансформация (`Transform`)
+## 1. Пространственные трансформации (`Transform`)
 
-Структура `Transform` хранит локальное пространственное состояние объекта через тройку: Позиция (`translation: Vec3`), Ориентация (`rotation: Quat`), Масштаб (`scale: Vec3`).
+Структура `Transform` представляет локальное положение объекта в трехмерном пространстве:
 
 ```rust
-// Создание
-let mut transform = Transform::from_translation(Vec3::new(0.0, 2.0, -5.0));
-
-// Манипуляции
-transform.rotate_y(1.5 * dt);
-transform.rotate_x(0.5 * dt);
-transform.translate(Vec3::new(0.1, 0.0, 0.0));
-
-// Матрица модели 4x4
-let mat: Mat4 = transform.matrix();
+pub struct Transform {
+    pub translation: glam::Vec3,
+    pub rotation: glam::Quat,
+    pub scale: glam::Vec3,
+}
 ```
+
+- **Модельная матрица:** `transform.matrix() -> Mat4` формирует аффинную матрицу $4 \times 4$ по формуле $M = T \cdot R \cdot S$.
+- **Манипуляторы вращения:** `rotate_x(rad)`, `rotate_y(rad)`, `rotate_z(rad)` умножают текущий кватернион на инкрементальное вращение.
+- **Эйлеровы углы:** `set_euler_angles(x_rad, y_rad, z_rad)` задает ориентацию в порядке конвенции YXZ.
 
 ---
 
-## 2. Камера (`Camera`)
+## 2. Камеры и проекции (`Camera`, `Projection`)
 
-Поддерживает перспективную и ортографическую проекции:
+Структура `Camera` объединяет пространственную позу (`transform: Transform`) и геометрию оптической проекции (`projection: Projection`):
 
 ```rust
-// Перспективная камера для 3D сцены
-let mut camera = Camera::perspective(60.0, ctx.aspect_ratio(), 0.1, 100.0);
-camera.look_at(
-    Vec3::new(0.0, 5.0, 10.0), // Позиция глаза
-    Vec3::new(0.0, 0.0, 0.0),  // Точка фокуса
-    Vec3::Y,                   // Вектор "вверх"
-);
-
-// Матрицы
-let view = camera.view_matrix();
-let proj = camera.projection_matrix(ctx.aspect_ratio());
+pub enum Projection {
+    Perspective {
+        fov_y_rad: f32,
+        z_near: f32,
+        z_far: f32,
+    },
+    Orthographic {
+        half_width: f32,
+        half_height: f32,
+        z_near: f32,
+        z_far: f32,
+    },
+}
 ```
+
+### Основные методы `Camera`:
+- `Camera::perspective(fov_y_deg, aspect, z_near, z_far)` — создает перспективную камеру с углом обзора в градусах.
+- `Camera::orthographic(width, height, z_near, z_far)` — создает ортографическую камеру с заданными размерами параллелепипеда видимости.
+- `look_at(eye: Vec3, target: Vec3, up: Vec3)` — пересчитывает поворот и позицию камеры для наведения на целевую точку.
+- `view_matrix() -> Mat4` — возвращает правую матрицу вида (обратную матрицу мирового положения камеры).
+- `projection_matrix(aspect_ratio: f32) -> Mat4` — вычисляет правую матрицу проекции OpenGL для заданного соотношения сторон.
 
 ---
 
-## 3. Узлы сцены (`SpatialNode`)
+## 3. Узел сцены (`SpatialNode`)
 
-Каждый элемент в сцене представлен структурой `SpatialNode`:
-- `id: NodeId` — уникальный дескриптор узла в сцене.
-- `parent: Option<NodeId>` — ссылка на родительский узел.
-- `children: Vec<NodeId>` — список дочерних узлов.
-- `transform: Transform` — локальная трансформация относительно родителя.
-- `global_transform: Mat4` — кэшированная глобальная матрица в мировом пространстве.
-- `kind: NodeKind`:
-  - `Empty` — служебный узел (точка привязки, группировка).
-  - `Mesh3D(Mesh3D)` — 3D-геометрия.
-  - `Surface2D(Surface2D)` — 2D-поверхность.
-  - `Text2D(Text2D)` — 2D-текст.
-- `collider: Option<Collider>` — объем коллизии для пространственных запросов.
-- `behavior: Option<Box<dyn NodeBehavior>>` — автономный скрипт/поведение.
+Каждый объект в графе сцены представлен структурой `SpatialNode`:
 
-### Трейт поведения `NodeBehavior`:
+```rust
+pub struct SpatialNode {
+    pub id: NodeId,
+    pub name: String,
+    pub parent: Option<NodeId>,
+    pub children: Vec<NodeId>,
+    pub transform: Transform,
+    pub global_transform: Mat4,
+    pub kind: NodeKind,
+    pub collider: Option<Collider>,
+    pub visible: bool,
+    pub is_static: bool,
+    pub behavior: Option<Box<dyn NodeBehavior>>,
+}
+```
+
+### Разновидности полезной нагрузки (`NodeKind`):
+- `NodeKind::Empty` — точка привязки, вспомогательный шарнир или родительская группа.
+- `NodeKind::Mesh3D(Mesh3D)` — трехмерная полигональная сетка.
+- `NodeKind::Surface2D(Surface2D)` — плоская прямоугольная панель в экранных координатах.
+- `NodeKind::Text2D(Text2D)` — экранный текстовый элемент.
+
+### Автономное поведение (`NodeBehavior`):
+Трейт для привязки логики симуляции к отдельным узлам:
 ```rust
 pub trait NodeBehavior {
-    fn on_process(&mut self, node: &mut SpatialNode, ctx: &mut Context, dt: f32) {}
+    fn on_process(&mut self, node: &mut SpatialNode, ctx: &mut Context, dt: f32);
 }
 ```
 
 ---
 
-## 4. Контейнер сцены (`Scene`)
+## 4. Граф сцены (`Scene`)
 
-`Scene` управляет плоским массивом узлов, деревом иерархии и циклами обновления:
+`Scene` управляет иерархией узлов, источниками света, камерой и циклами обновления:
 
-### Наследование трансформаций:
-При вызове `scene.update_transforms()` или перед каждым рендером, сцена рекурсивно вычисляет мировые матрицы:
-$$\text{global\_transform}_{\text{child}} = \text{global\_transform}_{\text{parent}} \times \text{local\_matrix}_{\text{child}}$$
+### Рекурсивный пересчет трансформаций:
+Метод `update_transforms()` обходит иерархию узлов сверху вниз:
+$$M_{\text{global}}(\text{child}) = M_{\text{global}}(\text{parent}) \times M_{\text{local}}(\text{child})$$
+Если узел не имеет родителя (`parent == None`), его глобальная матрица совпадает с локальной матрицей `transform.matrix()`.
 
-### Спавн узлов:
+### Спавн и привязка:
 ```rust
-let cube_id = scene.spawn_mesh_3d(mesh, transform, collider);
-let panel_id = scene.spawn_surface_2d(surface, transform, collider);
-let text_id = scene.spawn_text_2d(text, transform);
+let parent_id = scene.spawn_node("Anchor", NodeKind::Empty, Transform::from_xyz(0.0, 5.0, 0.0), None);
+let mesh_id = scene.spawn_mesh_3d(Mesh3D::cube(1.0), Transform::IDENTITY, Collider::box_3d(Vec3::ONE));
 
-// Привязка в иерархию (parent-child)
-scene.attach_child(parent_id, child_id);
+// Построение иерархии (parent-child)
+scene.attach_child(parent_id, mesh_id);
 ```
 
-### Пространственные запросы:
-- `scene.check_intersection(node_a, node_b) -> Option<ContactManifold>` — проверяет пересечение коллидеров узлов.
-- `scene.resolve_penetration(node_a, node_b, &contact)` — кинематически раздвигает узлы вдоль нормали контакта.
-- `scene.raycast(&ray) -> Option<(NodeId, RaycastHit)>` — находит ближайший узел, пересекаемый лучом.
+### Взаимодействие со сценой:
+- `scene.update(ctx, dt)` — пересчитывает мировые матрицы узлов и вызывает `on_process` для всех зарегистрированных поведений.
+- `scene.render(ctx)` — выполняет фазы отрисовки 3D мешей, 2D поверхностей и 2D текста.
+- `scene.check_intersection(id_a, id_b)` — проверяет геометрическое перекрытие ограничивающих объемов узлов.
+- `scene.resolve_penetration(id_a, id_b, &contact)` — кинематически разделяет пересекающиеся узлы.
+- `scene.raycast(&ray)` — выполняет трассировку луча по всей сцене.

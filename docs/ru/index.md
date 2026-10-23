@@ -1,70 +1,77 @@
-# Oxide Engine — Архитектурное руководство
+# Архитектурное руководство движка Oxide
 
-> **Авторы:** Nazaryan Artem (`nazaryannnn36@gmail.com`) & Google Gemini 3.8  
-> **Язык ядра:** Rust + OpenGL 3.3 Core Profile
-
----
-
-## Введение
-
-**Oxide** — модульный, высокопроизводительный мультимедийный и симуляционный рантайм-фреймворк. Архитектура спроектирована как фундамент для будущих сред визуального проектирования и интерактивных приложений (концептуально близко к архитектуре узлов и сцен Godot, но с полным отказом от узкоспециализированной игровой терминологии в пользу системных инженерных сущностей).
-
-Фреймворк поддерживает одновременное использование как чистой библиотеки Rust через фасад `oxide::prelude::*`, так и любого языка с поддержкой C-ABI (C, C++, Python, C#, Zig) через `oxide.dll` / `liboxide.so` и `include/oxide.h`.
+Oxide — модульный 2D/3D-движок рендеринга, пространственной иерархии и детекции коллизий, написанный на Rust с графическим бэкендом OpenGL 3.3 Core Profile. Предоставляет независимые подсистемы для рендеринга в реальном времени, иерархических трансформаций сцены, геометрических коллизий и интеграции в сторонние языки через C99 ABI.
 
 ---
 
-## Архитектурные слои (Architecture Stack)
+## Конвейер обработки кадра (Frame Pipeline)
+
+Выполнение каждого кадра в Oxide подчинено детерминированному конвейеру:
 
 ```mermaid
-graph TD
-    UserCode[Пользовательское приложение: Rust / Python / C / C++] --> Facade[Публичный API / Фасад / C-ABI]
-    
-    subgraph Engine Core [Ядро Oxide]
-        Facade --> Core[Модуль core: App, Context, Time, Input]
-        Facade --> Spatial[Модуль spatial: Scene Graph, Nodes, Camera, Transform]
-        Facade --> Collision[Модуль collision: AABB, Sphere, Raycast, Manifold]
-        Facade --> Text[Модуль text: Font, FontAtlas, PipelineText]
-        Facade --> Assets[Модуль assets: Mesh3D, Surface2D, OBJ & Image Loader]
-        
-        Spatial --> Renderer[Модуль renderer: Pipeline3D, Pipeline2D, Shaders, Buffers]
-        Text --> Renderer
-        Core --> Window[Модуль window: WindowContext winit + glutin + glow]
-        Renderer --> Window
+sequenceDiagram
+    autonumber
+    participant OS as Оконный менеджер ОС
+    participant Window as window::WindowContext
+    participant Core as core::App / Event Loop
+    participant InputTime as InputState & Time
+    participant Scene as spatial::Scene
+    participant Collision as collision::Collider
+    participant Renderer as renderer::Pipeline
+    participant GPU as Графический процессор (GPU)
+
+    OS->>Window: События ввода / перерисовки (RedrawRequested)
+    Window->>Core: WindowEvent
+    Core->>InputTime: Обновление Time (расчет dt) и InputState
+    Core->>Scene: scene.update(ctx, dt)
+    Scene->>Scene: update_transforms() (пересчет мировых матриц)
+    Scene->>Collision: check_intersection() / resolve_penetration()
+    Core->>Renderer: scene.render(ctx)
+    rect rgb(20, 24, 34)
+        Renderer->>GPU: Фаза 1: 3D-проход (Pipeline3D, глубина, освещение)
     end
-    
-    Window --> OS[Операционная система & GPU Driver: OpenGL 3.3 Core]
+    rect rgb(24, 30, 42)
+        Renderer->>GPU: Фаза 2: 2D-проход (Pipeline2D, экранные квады, блендинг)
+    end
+    rect rgb(28, 36, 50)
+        Renderer->>GPU: Фаза 3: Текстовый проход (PipelineText, атлас глифов)
+    end
+    Renderer->>Window: swap_buffers() (смена буферов)
+    Window->>OS: Вывод готового кадра на дисплей
 ```
 
+### Этапы кадра:
+1. **Опрос событий окна:** Подсистема `window` получает события изменения размера, фокуса и пользовательского ввода от операционной системы через `winit`.
+2. **Обновление времени и ввода:** `Time` рассчитывает дельта-время $\Delta t$ текущего кадра (с ограничением сверху в 0.1 с для предотвращения спирали задержек), а `InputState` регистрирует переходные состояния клавиш и курсора.
+3. **Обновление графа сцены:** `Scene::update` обходит дерево узлов, рекурсивно вычисляет глобальные матрицы трансформаций ($M_{\text{global}} = M_{\text{parent}} \times M_{\text{local}}$) и передает контекст пользовательским компонентам `NodeBehavior`.
+4. **Геометрическая детекция коллизий:** Проверяются пересечения ограничивающих объемов узлов (`Collider`), формируются контактные манифолды (`ContactManifold`) и выполняется кинематическое расталкивание тел.
+5. **Многопроходный рендеринг:**
+   - **Фаза 1 (3D):** Активация `Pipeline3D`, включение проверки глубины `GL_DEPTH_TEST`, передача матриц вида и проекции, расчет направленного освещения и отрисовка полигональных мешей `Mesh3D`.
+   - **Фаза 2 (2D):** Активация `Pipeline2D`, отключение теста глубины, включение альфа-блендинга, расчет экранной ортографической проекции и отрисовка поверхностей `Surface2D`.
+   - **Фаза 3 (Текст):** Активация `PipelineText`, привязка текстурного атласа `FontAtlas` и пакетный вывод символов `Text2D` единым вызовом `glDrawElements`.
+6. **Смена буферов:** `WindowContext::swap_buffers` меняет передний и задний буферы кадра с вертикальной синхронизацией.
+
 ---
 
-## Структура документации
+## Навигация по документации
 
-Подробное руководство разделено по модулям:
-
-| Модуль | Описание | Документ |
+| Модуль | Файл | Описание подсистемы |
 | :--- | :--- | :--- |
-| **`core`** | Жизненный цикл приложения, тайминг, ввод, контекст выполнения, ошибки | [`docs/ru/core.md`](file:///e:/PRJCT/Oxide/docs/ru/core.md) |
-| **`window`** | Интеграция `winit 0.29`, создание контекста `glutin 0.31` и привязка `glow` | [`docs/ru/window.md`](file:///e:/PRJCT/Oxide/docs/ru/window.md) |
-| **`spatial`** | Иерархический граф сцены, трансформации TRS, дерево узлов, камеры | [`docs/ru/spatial.md`](file:///e:/PRJCT/Oxide/docs/ru/spatial.md) |
-| **`renderer`** | 3D-пайплайн с освещением, 2D-пайплайн квадов, шейдеры GLSL, буферы и текстуры | [`docs/ru/renderer.md`](file:///e:/PRJCT/Oxide/docs/ru/renderer.md) |
-| **`collision`** | Аналитические коллизии (Box 2D/3D, Sphere), Raycasting, резолвер проникновений | [`docs/ru/collision.md`](file:///e:/PRJCT/Oxide/docs/ru/collision.md) |
-| **`text`** | Растеризация TTF/OTF через `fontdue`, 1024x1024 атлас, поддержка кириллицы | [`docs/ru/text.md`](file:///e:/PRJCT/Oxide/docs/ru/text.md) |
-| **`assets`** | Процедурные примитивы (куб, сфера, плоскость), загрузчик Wavefront OBJ и текстур | [`docs/ru/assets.md`](file:///e:/PRJCT/Oxide/docs/ru/assets.md) |
-| **`ffi`** | Внешний интерфейс C-ABI, заголовочный файл `oxide.h`, Python-биндинги | [`docs/ru/ffi.md`](file:///e:/PRJCT/Oxide/docs/ru/ffi.md) |
+| **`core`** | [`core.md`](core.md) | Жизненный цикл приложения (`App`), контекст выполнения (`Context`), тайминг (`Time`), опрос ввода (`InputState`), типизированные ошибки (`OxideError`). |
+| **`window`** | [`window.md`](window.md) | Создание системного окна, инициализация контекста OpenGL 3.3 Core (`WindowContext`), управление областью вывода (viewport). |
+| **`renderer`** | [`renderer.md`](renderer.md) | Конвейеры рендеринга (`Pipeline3D`, `Pipeline2D`), шейдерные программы (`ShaderProgram`), GPU-буферы (`VertexArray`, `VertexBuffer`, `IndexBuffer`), текстуры (`Texture2D`). |
+| **`spatial`** | [`spatial.md`](spatial.md) | Иерархический граф сцены (`Scene`, `SpatialNode`), пространственные трансформации (`Transform`), перспективная и ортографическая камеры (`Camera`). |
+| **`collision`** | [`collision.md`](collision.md) | Геометрические коллизии (`Collider`: Box3D, Sphere, Box2D), контактные манифолды (`ContactManifold`), трассировка лучей (`Ray3D`, `RaycastHit`). |
+| **`assets`** | [`assets.md`](assets.md) | Полигональные меши в ОЗУ (`Mesh3D`), 2D-поверхности (`Surface2D`), процедурные генераторы (куб, сфера, плоскость), загрузка OBJ и изображений. |
+| **`text`** | [`text.md`](text.md) | Парсинг шрифтов TrueType/OpenType (`Font`), упаковка атласа глифов 1024x1024 (`FontAtlas`), текстовые элементы (`Text2D`), конвейер текста (`PipelineText`). |
+| **`math`** | [`math.md`](math.md) | Система координат, единицы измерения углов, векторы, матрицы 4x4 и кватернионы из библиотеки `glam`. |
+| **`ffi`** | [`ffi.md`](ffi.md) | Экспорт C ABI (`include/oxide.h`), ручное управление памятью кучи Rust, биндинги Python на базе `ctypes` (`bindings/python/oxide.py`). |
 
 ---
 
-## Принципы проектирования
+## Инженерные принципы
 
-1. **Строгая инженерная терминология (Zero Game-Specific Jargon):**
-   - Вместо `Game` используются `App`, `Runtime`.
-   - Вместо `Actor` / `GameObject` используются `SpatialNode`, `Element`.
-   - Вместо `Level` используется `Scene`, `Workspace`.
-   - Вместо `Sprite` используются `Surface2D`, `PlanarMesh`, `TextureQuad`.
-2. **Опыт одного файла (Single-Import Facade):**
-   - Достаточно одной строки `use oxide::prelude::*;`, чтобы получить доступ ко всем базовым сущностям рантайма.
-3. **Двухуровневое пространство:**
-   - **3D сцена:** Мировые координаты (Y — вверх, -Z — вперед), перспективная камера, освещение.
-   - **2D наложение (Overlay):** Экранные пиксельные координаты (0,0 в левом верхнем углу, X вправо, Y вниз), ортографическая проекция, прозрачность.
-4. **Кроссплатформенность и многоязычность:**
-   - Ядро на Rust компилируется как `rlib` и `cdylib` без изменений в кодовой базе.
+1. **Модульная архитектура подсистем:** Модули ядра (`renderer`, `spatial`, `collision`, `text`, `assets`) слабо связаны и могут использоваться как изолированно, так и в составе единого рантайма приложения.
+2. **Разделение данных ОЗУ и видеопамяти GPU:** Структуры ресурсов (`Mesh3D`, `Surface2D`, `Font`) отделены от ресурсов видеопамяти (`VertexArray`, `VertexBuffer`, `Texture2D`), что исключает неявные аллокации в видеопамяти.
+3. **Единый фасад импорта:** Все публичные типы и функции ядра доступны через модуль `oxide::prelude::*`.
+4. **Кроссплатформенный C ABI:** Ядро собирается одновременно как статическая библиотека Rust (`rlib`) и динамическая библиотека (`cdylib`), предоставляя стандартный интерфейс C99.

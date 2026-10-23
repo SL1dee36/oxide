@@ -1,3 +1,5 @@
+//! OpenGL graphics pipelines, shader programs, textures, and GPU buffer abstractions.
+
 pub mod buffer;
 pub mod pipeline_2d;
 pub mod pipeline_3d;

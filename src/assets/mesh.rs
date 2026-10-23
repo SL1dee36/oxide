@@ -3,17 +3,26 @@ use crate::core::error::OxideError;
 use crate::renderer::buffer::{IndexBuffer, Vertex3D, VertexArray, VertexBuffer};
 use crate::renderer::pipeline_3d::Pipeline3D;
 
+/// Host-side 3D polygonal mesh geometry with lazily initialized GPU buffers.
 pub struct Mesh3D {
+    /// Host-side vertex attribute array.
     pub vertices: Vec<Vertex3D>,
+    /// Host-side triangle index array.
     pub indices: Vec<u32>,
+    /// Base albedo diffuse color tint.
     pub color: Color,
+    /// Self-illumination emissive color tint.
     pub emissive: Color,
+    /// Allocated GPU vertex array object.
     pub vao: Option<VertexArray>,
+    /// Allocated GPU vertex buffer object.
     pub vbo: Option<VertexBuffer>,
+    /// Allocated GPU index buffer object.
     pub ebo: Option<IndexBuffer>,
 }
 
 impl Mesh3D {
+    /// Constructs a mesh from raw vertex and index slices, initially resident in host memory.
     pub fn new(vertices: Vec<Vertex3D>, indices: Vec<u32>) -> Self {
         Self {
             vertices,
@@ -26,16 +35,19 @@ impl Mesh3D {
         }
     }
 
+    /// Sets the base albedo color.
     pub fn with_color(mut self, color: Color) -> Self {
         self.color = color;
         self
     }
 
+    /// Sets the emissive color.
     pub fn with_emissive(mut self, emissive: Color) -> Self {
         self.emissive = emissive;
         self
     }
 
+    /// Generates a procedural 3D box mesh with dimension `size` centered at origin.
     pub fn cube(size: f32) -> Self {
         let h = size * 0.5;
         let p = [
@@ -78,6 +90,7 @@ impl Mesh3D {
         Self::new(vertices, indices)
     }
 
+    /// Generates a planar horizontal quad in XZ plane with upward normal (0, 1, 0).
     pub fn plane(width: f32, depth: f32) -> Self {
         let hw = width * 0.5;
         let hd = depth * 0.5;
@@ -94,6 +107,7 @@ impl Mesh3D {
         Self::new(vertices, indices)
     }
 
+    /// Generates a procedural UV-sphere with given radius, latitude rings, and longitude sectors.
     pub fn sphere(radius: f32, rings: u32, sectors: u32) -> Self {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
@@ -142,6 +156,7 @@ impl Mesh3D {
         Self::new(vertices, indices)
     }
 
+    /// Allocates and uploads GPU buffers (VAO, VBO, EBO) if they do not yet exist.
     pub fn ensure_gpu_buffers(&mut self, gl: &glow::Context) -> Result<(), OxideError> {
         if self.vao.is_some() {
             return Ok(());

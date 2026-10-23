@@ -1,92 +1,136 @@
-# Module `collision` — Spatial Queries & Collision Engine
+# Subsystem `collision` — Geometric Collision Detection and Raycasting
 
-The `collision` module provides a lightweight, analytical query engine for intersection testing, contact manifold generation, raycasting, and kinematic separation.
+The `collision` module provides geometric intersection testing algorithms, contact manifold generation, kinematic penetration resolution, and analytical raycasting.
 
-Source files: [`src/collision/`](file:///e:/PRJCT/Oxide/src/collision/)
+> **Architectural Note:** The `collision` subsystem performs geometric collision detection and is **not a rigid body dynamics physics engine**. It does not model momentum, angular inertia tensors, friction, or dynamic constraint solvers. It solely evaluates geometric overlap queries and applies kinematic separation.
+
+Source code: [`src/collision/`](../../src/collision/)
 
 ---
 
-## 1. Colliders (`Collider`)
+## 1. Relationship Between Spatial Transforms and Colliders
 
-The `Collider` enum designates local volume bounds attached to scene nodes:
+Each scene graph entity (`SpatialNode`) optionally holds a local bounding volume (`collider: Option<Collider>`).
+
+During intersection testing, `Collider` geometries are transformed into world coordinates via `SpatialNode::global_matrix()`:
+- **Box3D:** The local axis-aligned box is transformed by the $4 \times 4$ affine matrix into a conservative world `Aabb3D` using absolute column vector projections.
+- **Sphere:** The center is transformed via `matrix.transform_point3(Vec3::ZERO)`, and the radius scales uniformly.
+- **Box2D:** Dimensions and translation map directly to 2D pixel coordinates.
+
+---
+
+## 2. Bounding Volume Types (`Collider`)
+
+The `Collider` enumeration specifies bounding geometry in the node's local coordinate frame:
 
 ```rust
 pub enum Collider {
-    Box3D { half_extents: Vec3 },
+    Box3D { half_extents: glam::Vec3 },
     Sphere { radius: f32 },
-    Box2D { half_extents: Vec2 },
+    Box2D { half_extents: glam::Vec2 },
 }
-
-// Constructors
-let box3d = Collider::box_3d(Vec3::new(2.0, 2.0, 2.0)); // half_extents = (1, 1, 1)
-let sphere = Collider::sphere(1.5);
-let box2d = Collider::box_2d(Vec2::new(100.0, 50.0));
 ```
 
----
-
-## 2. Bounding Volumes
-
-### `Aabb3D` (Axis-Aligned Bounding Box)
-- `from_center_half_extents(center: Vec3, half: Vec3) -> Self`: Constructs an AABB from center point and extents.
-- `transform(&self, matrix: &Mat4) -> Self`: Transforms an AABB through an arbitrary 4x4 matrix, computing tight rotated bounds.
-- `intersects(&self, other: &Self) -> bool`: Fast boolean overlap test.
-- `contact(&self, other: &Self) -> Option<ContactManifold>`: Calculates the minimum penetration axis, normal, and point.
-
-### `BoundingSphere`
-- `intersects(&self, other: &Self) -> bool`: Center distance squared evaluation against combined radii.
-- `contact(&self, other: &Self) -> Option<ContactManifold>`: Generates a contact manifold along the radial center offset.
-
-### `Aabb2D` (Screen-Space Bounding Box)
-- Analytical rectangle intersection checks for 2D UI elements.
+Constructors:
+- `Collider::box_3d(size: Vec3) -> Self` — Takes full dimensions `(dx, dy, dz)` and stores half-extents `size * 0.5`.
+- `Collider::sphere(radius: f32) -> Self` — Defines a sphere of radius `radius`.
+- `Collider::box_2d(size: Vec2) -> Self` — Takes full pixel dimensions `(w, h)` and stores half-extents `size * 0.5`.
 
 ---
 
-## 3. The `ContactManifold` Structure
+## 3. Mathematical Bounding Volumes
 
-Upon detecting an intersection, a `ContactManifold` is generated:
+### `Aabb3D` (3D Axis-Aligned Bounding Box)
+```rust
+pub struct Aabb3D {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+```
+- `from_center_half_extents(center: Vec3, half_extents: Vec3) -> Self`
+- `transform(&self, matrix: &Mat4) -> Self` — Evaluates a conservative world AABB enclosing the transformed box.
+- `intersects(&self, other: &Self) -> bool` — Overlap evaluation along X, Y, and Z axes.
+- `contact(&self, other: &Self) -> Option<ContactManifold>` — Computes minimum overlap axis, penetration depth, and normal.
+- `contact_sphere(&self, sphere: &BoundingSphere) -> Option<ContactManifold>` — Computes closest-point distance between AABB and sphere.
+
+### `BoundingSphere` (3D Bounding Sphere)
+```rust
+pub struct BoundingSphere {
+    pub center: Vec3,
+    pub radius: f32,
+}
+```
+- `intersects(&self, other: &Self) -> bool` — Evaluates center distance squared: $\|\mathbf{c}_1 - \mathbf{c}_2\|^2 \le (r_1 + r_2)^2$.
+- `contact(&self, other: &Self) -> Option<ContactManifold>` — Generates contact along the center-to-center vector.
+
+### `Aabb2D` (2D Screen-Space AABB)
+```rust
+pub struct Aabb2D {
+    pub min: Vec2,
+    pub max: Vec2,
+}
+```
+Analytical overlap testing between 2D rectangles in screen coordinates.
+
+---
+
+## 4. Contact Manifold (`ContactManifold`)
+
+Upon intersection, an analytical `ContactManifold` is generated:
 
 ```rust
 pub struct ContactManifold {
-    pub normal: Vec3, // Unit separation normal
-    pub depth: f32,   // Penetration depth (> 0.0)
-    pub point: Vec3,  // World space contact point
+    pub normal: glam::Vec3,
+    pub depth: f32,
+    pub point: glam::Vec3,
 }
 ```
+
+- **`normal: Vec3`**: Unit vector along minimum separation axis, pointing from body A toward body B.
+- **`depth: f32`**: Penetration distance along separation normal ($> 0.0$).
+- **`point: Vec3`**: Estimated world-space contact location.
 
 ---
 
-## 4. Kinematic Separation (`resolve_penetration` & `resolve_penetration_weighted`)
+## 5. Kinematic Penetration Resolution (`resolve_penetration`)
 
-Displaces overlapping bodies along the contact normal to eliminate penetration, taking the `is_static` flag into account:
+Separates intersecting nodes along the contact normal without dynamic force modeling:
 
 ```rust
-if let Some(contact) = scene.check_intersection(wall_node, sphere_node) {
-    // If one node is static (is_static == true), 100% of separation displacement
-    // is applied to the dynamic node.
-    scene.resolve_penetration(wall_node, sphere_node, &contact);
-}
+pub fn resolve_penetration_weighted(
+    transform_a: &mut Transform,
+    is_static_a: bool,
+    transform_b: &mut Transform,
+    is_static_b: bool,
+    contact: &ContactManifold,
+);
 ```
 
-- When both nodes are dynamic: separation is split equally (50% / 50%).
-- When one node is static (e.g. maze wall, obstacle): the static node remains fixed (0%), and the dynamic node receives 100% of the displacement.
-- When both are static: no displacement occurs.
-
-Analytical contact generation is supported for: Box3D $\leftrightarrow$ Box3D, Sphere $\leftrightarrow$ Sphere, and Box3D $\leftrightarrow$ Sphere.
+### Displacement Allocation:
+1. **Both bodies dynamic (`is_static == false`):** Separation displacement is split equally (50% / 50%):
+   $$\mathbf{T}_a \leftarrow \mathbf{T}_a - \mathbf{n} \cdot \frac{d}{2}, \quad \mathbf{T}_b \leftarrow \mathbf{T}_b + \mathbf{n} \cdot \frac{d}{2}$$
+2. **One body static (`is_static == true`):** The static obstacle receives 0% displacement, and the dynamic body receives 100% of the displacement vector ($d$).
+3. **Both bodies static:** Displacements are ignored.
 
 ---
 
-## 5. Raycasting (`Ray3D`, `RaycastHit`)
+## 6. Raycasting (`Ray3D`, `RaycastHit`)
 
-Supports spatial queries and mouse object picking:
+Provides spatial intersection testing for line-of-sight checks and entity picking:
 
 ```rust
-let ray = Ray3D::new(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0));
+pub struct Ray3D {
+    pub origin: Vec3,
+    pub direction: Vec3, // Automatically normalized
+}
 
-// Query against all scene colliders
-if let Some((hit_node_id, hit_info)) = scene.raycast(&ray) {
-    println!("Hit node {:?} at distance {:.2}", hit_node_id, hit_info.distance);
-    println!("Intersection point: {:?}", hit_info.point);
-    println!("Surface normal: {:?}", hit_info.normal);
+pub struct RaycastHit {
+    pub distance: f32,  // Parametric distance t >= 0.0
+    pub point: Vec3,     // World-space hit location
+    pub normal: Vec3,    // Outward surface normal at hit point
 }
 ```
+
+- **Slab Method:** `Aabb3D::raycast` computes analytical ray-plane intersection intervals.
+- **Quadratic Solution:** `BoundingSphere::raycast` solves the ray-sphere intersection quadratic equation.
+- **Scene Traversal:** `Scene::raycast(&self, ray: &Ray3D) -> Option<(NodeId, RaycastHit)>` tests all visible colliders and returns the hit record with minimal `distance`.

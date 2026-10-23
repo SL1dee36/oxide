@@ -207,10 +207,20 @@ class Scene:
     def __init__(self):
         self._ptr = _dll.oxide_scene_create()
 
-    def __del__(self):
+    def destroy(self):
+        """Release underlying OxideScene allocated in Rust heap."""
         if hasattr(self, "_ptr") and self._ptr:
             _dll.oxide_scene_destroy(self._ptr)
             self._ptr = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.destroy()
+
+    def __del__(self):
+        self.destroy()
 
     def set_camera_perspective(self, fov_deg, aspect, near, far, eye, target):
         _dll.oxide_scene_set_camera_perspective(
@@ -267,25 +277,56 @@ class App:
         self.title = title
         self.width = width
         self.height = height
+        self._ptr = None
+
+    def destroy(self):
+        """Release underlying OxideApp if not already consumed by run()."""
+        if self._ptr:
+            _dll.oxide_app_destroy(self._ptr)
+            self._ptr = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.destroy()
+
+    def __del__(self):
+        self.destroy()
 
     def run(self, handler):
+        """
+        Initialize and run the OS event/frame loop.
+        Ownership of the underlying OxideApp pointer is transferred to oxide_app_run.
+        """
         app_ptr = _dll.oxide_app_create(self.title.encode("utf-8"), self.width, self.height)
+        self._ptr = app_ptr
 
-        def _init(ctx_ptr, user_data):
-            if hasattr(handler, "on_init"):
-                handler.on_init(Context(ctx_ptr))
+        try:
+            def _init(ctx_ptr, user_data):
+                if hasattr(handler, "on_init"):
+                    handler.on_init(Context(ctx_ptr))
 
-        def _update(ctx_ptr, dt, user_data):
-            if hasattr(handler, "on_update"):
-                handler.on_update(Context(ctx_ptr), dt)
+            def _update(ctx_ptr, dt, user_data):
+                if hasattr(handler, "on_update"):
+                    handler.on_update(Context(ctx_ptr), dt)
 
-        def _render(ctx_ptr, user_data):
-            if hasattr(handler, "on_render"):
-                handler.on_render(Context(ctx_ptr))
+            def _render(ctx_ptr, user_data):
+                if hasattr(handler, "on_render"):
+                    handler.on_render(Context(ctx_ptr))
 
-        c_init = OxideInitCallback(_init)
-        c_update = OxideUpdateCallback(_update)
-        c_render = OxideRenderCallback(_render)
+            c_init = OxideInitCallback(_init)
+            c_update = OxideUpdateCallback(_update)
+            c_render = OxideRenderCallback(_render)
 
-        callbacks = OxideCallbacks(c_init, c_update, c_render, None)
-        return _dll.oxide_app_run(app_ptr, callbacks)
+            callbacks = OxideCallbacks(c_init, c_update, c_render, None)
+
+            # oxide_app_run consumes and deallocates app_ptr internally
+            self._ptr = None
+            return _dll.oxide_app_run(app_ptr, callbacks)
+        except Exception:
+            if self._ptr:
+                _dll.oxide_app_destroy(self._ptr)
+                self._ptr = None
+            raise
+

@@ -4,24 +4,37 @@ use crate::text::font::Font;
 use glam::Vec2;
 use std::collections::HashMap;
 
+/// Pre-rasterized glyph metrics and atlas UV texture coordinates.
 #[derive(Debug, Clone, Copy)]
 pub struct Glyph {
+    /// Upper-left UV coordinate in texture atlas.
     pub uv_min: Vec2,
+    /// Bottom-right UV coordinate in texture atlas.
     pub uv_max: Vec2,
+    /// Physical pixel dimensions `(width, height)` of the rasterized glyph.
     pub size: Vec2,
+    /// Baseline offset vector `(xmin, ymin)`.
     pub offset: Vec2,
+    /// Horizontal cursor advance distance in pixels.
     pub advance_x: f32,
 }
 
+/// Dynamic 1024x1024 glyph texture atlas and typographic metric table.
 pub struct FontAtlas {
+    /// Associated source font.
     pub font: Font,
+    /// Base rasterization font size in pixels.
     pub font_size: f32,
+    /// GPU texture containing packed glyph alpha masks.
     pub texture: Texture2D,
+    /// Lookup table mapping Unicode characters to glyph atlas metrics.
     pub glyphs: HashMap<char, Glyph>,
+    /// Default line advance height in pixels.
     pub line_height: f32,
 }
 
 impl FontAtlas {
+    /// Rasterizes ASCII, Cyrillic, and punctuation ranges at `font_size` and packs them into a 1024x1024 GPU texture.
     pub fn new(gl: &glow::Context, font: Font, font_size: f32) -> Result<Self, OxideError> {
         let atlas_width = 1024u32;
         let atlas_height = 1024u32;
@@ -111,6 +124,7 @@ impl FontAtlas {
         })
     }
 
+    /// Measures the pixel bounding box `(width, height)` of a multi-line text string.
     pub fn measure_text(&self, text: &str) -> Vec2 {
         let mut width = 0.0f32;
         let mut max_width = 0.0f32;

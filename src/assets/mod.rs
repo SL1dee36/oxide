@@ -1,3 +1,5 @@
+//! Asset loading, 3D polygon meshes, 2D surfaces, and image decoders.
+
 pub mod loader;
 pub mod mesh;
 pub mod surface;

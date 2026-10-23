@@ -62,10 +62,14 @@ void main() {
 }
 "#;
 
+/// Directional and ambient lighting parameters for 3D rendering.
 #[derive(Clone, Copy, Debug)]
 pub struct Light3D {
+    /// Unit vector pointing toward the directional light source.
     pub direction: Vec3,
+    /// Direct illumination color / intensity.
     pub color: Vec3,
+    /// Ambient background illumination floor.
     pub ambient: Vec3,
 }
 
@@ -79,12 +83,15 @@ impl Default for Light3D {
     }
 }
 
+/// 3D polygon graphics pipeline supporting perspective projection, Lambertian lighting, and depth testing.
 pub struct Pipeline3D {
     shader: ShaderProgram,
+    /// Active lighting configuration.
     pub light: Light3D,
 }
 
 impl Pipeline3D {
+    /// Compiles 3D vertex and fragment shaders and initializes default lighting.
     pub fn new(gl: &glow::Context) -> Result<Self, OxideError> {
         let shader = ShaderProgram::new(gl, VERTEX_SHADER_3D, FRAGMENT_SHADER_3D)?;
         Ok(Self {
@@ -93,6 +100,7 @@ impl Pipeline3D {
         })
     }
 
+    /// Configures vertex attribute pointers (0: position, 1: normal, 2: uv) for [`Vertex3D`].
     pub fn setup_vertex_attributes(gl: &glow::Context) {
         unsafe {
             let stride = std::mem::size_of::<Vertex3D>() as i32;
@@ -110,6 +118,7 @@ impl Pipeline3D {
         }
     }
 
+    /// Binds shader program, activates depth test with `GL_LEQUAL`, and sets view/projection/light uniforms.
     pub fn begin(
         &self,
         gl: &glow::Context,
@@ -129,6 +138,7 @@ impl Pipeline3D {
         self.shader.set_int(gl, "u_texture", 0);
     }
 
+    /// Submits indexed mesh geometry for rendering with specified transform, albedo, and optional texture.
     pub fn draw(
         &self,
         gl: &glow::Context,
@@ -164,10 +174,12 @@ impl Pipeline3D {
         vao.unbind(gl);
     }
 
+    /// Unbinds active 3D shader program.
     pub fn end(&self, gl: &glow::Context) {
         self.shader.unbind(gl);
     }
 
+    /// Deallocates the 3D shader program from GPU memory.
     pub fn destroy(&self, gl: &glow::Context) {
         self.shader.destroy(gl);
     }

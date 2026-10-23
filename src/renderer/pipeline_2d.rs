@@ -46,6 +46,7 @@ struct Vertex2D {
     uv: [f32; 2],
 }
 
+/// 2D graphics rendering pipeline utilizing screen-space orthographic projection and alpha blending.
 pub struct Pipeline2D {
     shader: ShaderProgram,
     quad_vao: VertexArray,
@@ -55,6 +56,7 @@ pub struct Pipeline2D {
 }
 
 impl Pipeline2D {
+    /// Compiles shaders and initializes shared unit-quad geometry buffers.
     pub fn new(gl: &glow::Context) -> Result<Self, OxideError> {
         let shader = ShaderProgram::new(gl, VERTEX_SHADER_2D, FRAGMENT_SHADER_2D)?;
 
@@ -111,6 +113,7 @@ impl Pipeline2D {
         })
     }
 
+    /// Sets up 2D orthographic projection (top-left origin, Y-down) and alpha blending state.
     pub fn begin(&mut self, gl: &glow::Context, screen_width: f32, screen_height: f32) {
         unsafe {
             gl.disable(glow::DEPTH_TEST);
@@ -133,6 +136,7 @@ impl Pipeline2D {
         self.shader.set_int(gl, "u_texture", 0);
     }
 
+    /// Submits a textured or solid-color transformed quad draw call.
     pub fn draw(
         &self,
         gl: &glow::Context,
@@ -162,6 +166,7 @@ impl Pipeline2D {
         self.quad_vao.unbind(gl);
     }
 
+    /// Restores OpenGL blend and depth testing states after 2D pass completion.
     pub fn end(&self, gl: &glow::Context) {
         self.shader.unbind(gl);
         unsafe {
@@ -170,6 +175,7 @@ impl Pipeline2D {
         }
     }
 
+    /// Deallocates pipeline shaders and unit-quad GPU geometry buffers.
     pub fn destroy(&self, gl: &glow::Context) {
         self.quad_ebo.destroy(gl);
         self.quad_vbo.destroy(gl);

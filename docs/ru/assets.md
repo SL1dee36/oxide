@@ -1,68 +1,109 @@
-# Модуль `assets` — Геометрия, текстуры и загрузка ресурсов
+# Модуль `assets` — Геометрия в ОЗУ и загрузка ресурсов
 
-Модуль `assets` отвечает за представление трехмерной геометрии (`Mesh3D`), двумерных поверхностей (`Surface2D`), процедурную генерацию примитивов и парсинг файлов с диска.
+Модуль `assets` отвечает за хранение геометрических сеток в оперативной памяти (`Mesh3D`), описание плоских двумерных элементов (`Surface2D`), процедурную генерацию примитивов и парсинг файлов форматов Wavefront OBJ и растровых изображений.
 
-Исходный код: [`src/assets/`](file:///e:/PRJCT/Oxide/src/assets/)
+Исходный код: [`src/assets/`](../../src/assets/)
 
 ---
 
-## 1. Трехмерная геометрия (`Mesh3D`)
+## 1. Структура полигонального меша (`Mesh3D`)
 
-`Mesh3D` хранит данные вершин и индексов в оперативной памяти и лениво загружает их в буферы видеопамяти (VAO/VBO/EBO):
+`Mesh3D` хранит геометрию в системной оперативной памяти хоста. Буферы видеопамяти (`vao`, `vbo`, `ebo`) инициализируются лениво:
 
 ```rust
 pub struct Mesh3D {
     pub vertices: Vec<Vertex3D>,
     pub indices: Vec<u32>,
+    pub color: Color,
+    pub emissive: Color,
     pub vao: Option<VertexArray>,
     pub vbo: Option<VertexBuffer>,
     pub ebo: Option<IndexBuffer>,
 }
 ```
 
-### Встроенные процедурные примитивы:
-- `Mesh3D::cube(size: f32)` — куб с корректными нормалями для каждой из 6 граней и UV-разверткой.
-- `Mesh3D::plane(width: f32, depth: f32)` — горизонтальная плоскость с нормалью, направленной вверх `[0, 1, 0]`.
-- `Mesh3D::sphere(radius: f32, rings: u32, sectors: u32)` — UV-сфера с настраиваемой детализацией сетки.
+### Процедурные генераторы примитивов:
+- `Mesh3D::cube(size: f32) -> Self` — генерирует параллелепипед из 24 вершин и 36 индексов с независимыми нормалями для каждой из 6 граней и UV-координатами `[0.0, 1.0]`.
+- `Mesh3D::plane(width: f32, depth: f32) -> Self` — генерирует горизонтальный четырехугольник в плоскости XZ (нормаль `[0.0, 1.0, 0.0]`) из 4 вершин и 6 индексов.
+- `Mesh3D::sphere(radius: f32, rings: u32, sectors: u32) -> Self` — генерирует параметрическую UV-сферу с заданным числом параллелей (`rings`) и меридианов (`sectors`).
 
-### Инициализация видеопамяти:
-Метод `mesh.ensure_gpu_buffers(gl)` вызывается сценой автоматически перед первым рендером, создавая VAO, VBO и EBO.
+### Выделение буферов в видеопамяти:
+```rust
+pub fn ensure_gpu_buffers(&mut self, gl: &glow::Context) -> Result<(), OxideError>;
+```
+Проверяет наличие `self.vao`. Если буферы еще не аллоцированы, создает `VertexArray`, `VertexBuffer` и `IndexBuffer`, настраивает атрибуты вершин через `Pipeline3D::setup_vertex_attributes` и сохраняет дескрипторы в структуре.
 
 ---
 
 ## 2. Двумерная поверхность (`Surface2D`)
 
-Используется для интерфейсных панелей, оверлеев и прямоугольных элементов:
+Структура `Surface2D` описывает параметры плоского прямоугольного элемента (размер в пикселях и цвет) без аллокации собственных полигональных сеток, так как `Pipeline2D` переиспользует общий единичный квад:
 
 ```rust
-let panel = Surface2D::from_color(
-    Vec2::new(300.0, 100.0),
-    Color::rgba(0.1, 0.15, 0.25, 0.9),
-);
+pub struct Surface2D {
+    pub size: glam::Vec2,
+    pub color: Color,
+}
+```
+
+Конструкторы:
+- `Surface2D::new(size: Vec2) -> Self`
+- `Surface2D::from_color(size: Vec2, color: Color) -> Self`
+
+---
+
+## 3. Функции загрузки ресурсов (`loader.rs`)
+
+Подсистема загрузки обеспечивает десериализацию как из файлов на диске, так и напрямую из срезов памяти (например, для встраивания ресурсов через `include_bytes!`):
+
+```rust
+// Загрузка 3D-модели OBJ из оперативной памяти
+pub fn load_obj_from_memory(bytes: &[u8]) -> Result<Mesh3D, OxideError>;
+
+// Загрузка 3D-модели OBJ с диска
+pub fn load_obj_file(path: impl AsRef<Path>) -> Result<Mesh3D, OxideError>;
+
+// Декодирование изображения (PNG/JPEG) и загрузка в текстуру GPU из памяти
+pub fn load_texture_from_memory(gl: &glow::Context, bytes: &[u8]) -> Result<Texture2D, OxideError>;
+
+// Чтение изображения с диска и загрузка в текстуру GPU
+pub fn load_texture_file(gl: &glow::Context, path: impl AsRef<Path>) -> Result<Texture2D, OxideError>;
 ```
 
 ---
 
-## 3. Загрузчики файлов (`loader.rs`)
+## 4. Этапы передачи ресурсов в конвейеры рендеринга
 
-Поддерживается загрузка геометрии и изображений из файловой системы и из срезов памяти:
+### Передача 3D-меша в `Pipeline3D`:
+1. Загрузка файла модели в ОЗУ:
+   ```rust
+   let mut mesh = load_obj_file("assets/models/component.obj")?;
+   ```
+2. Аллокация буферов GPU при наличии контекста:
+   ```rust
+   mesh.ensure_gpu_buffers(ctx.gl)?;
+   ```
+3. Отрисовка через конвейер:
+   ```rust
+   if let (Some(vao), Some(ebo)) = (&mesh.vao, &mesh.ebo) {
+       pipeline_3d.draw(ctx.gl, &model_matrix, mesh.color, mesh.emissive, None, vao, ebo);
+   }
+   ```
 
-### Загрузка 3D-мешей (.obj):
-Используется парсер `tobj` с автоматической триангуляцией:
-```rust
-// Из файла
-let mesh = load_obj_file("assets/models/teapot.obj")?;
-
-// Из памяти
-let mesh = load_obj_from_memory(OBJ_BYTE_DATA)?;
-```
-
-### Загрузка текстур (PNG, JPEG):
-Используется библиотека `image`:
-```rust
-// Загрузка текстуры в видеопамять из файла
-let texture = load_texture_file(ctx.gl, "assets/textures/diffuse.png")?;
-
-// Из памяти
-let texture = load_texture_from_memory(ctx.gl, PNG_BYTES)?;
-```
+### Передача 2D-поверхности в `Pipeline2D`:
+1. Создание описания поверхности:
+   ```rust
+   let surface = Surface2D::from_color(Vec2::new(300.0, 80.0), Color::rgba(0.1, 0.15, 0.25, 0.9));
+   ```
+2. Формирование матрицы масштабирования и переноса:
+   ```rust
+   let model_2d = Mat4::from_scale_rotation_translation(
+       Vec3::new(surface.size.x, surface.size.y, 1.0),
+       Quat::IDENTITY,
+       Vec3::new(20.0, 20.0, 0.0),
+   );
+   ```
+3. Отрисовка:
+   ```rust
+   pipeline_2d.draw(ctx.gl, &model_2d, surface.color, None);
+   ```

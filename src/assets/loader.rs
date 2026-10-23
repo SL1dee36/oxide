@@ -6,6 +6,7 @@ use std::io::Cursor;
 use std::path::Path;
 use tobj::LoadOptions;
 
+/// Deserializes a Wavefront OBJ polygonal model from an in-memory byte slice.
 pub fn load_obj_from_memory(bytes: &[u8]) -> Result<Mesh3D, OxideError> {
     let mut reader = Cursor::new(bytes);
     let options = LoadOptions {
@@ -56,11 +57,13 @@ pub fn load_obj_from_memory(bytes: &[u8]) -> Result<Mesh3D, OxideError> {
     Ok(Mesh3D::new(vertices, indices))
 }
 
+/// Reads and parses a Wavefront OBJ polygonal file from disk.
 pub fn load_obj_file(path: impl AsRef<Path>) -> Result<Mesh3D, OxideError> {
     let bytes = std::fs::read(path)?;
     load_obj_from_memory(&bytes)
 }
 
+/// Decodes an image from memory (PNG, JPEG) and uploads it into a GPU 2D texture.
 pub fn load_texture_from_memory(gl: &glow::Context, bytes: &[u8]) -> Result<Texture2D, OxideError> {
     let img = image::load_from_memory(bytes)
         .map_err(|e| OxideError::TextureError(e.to_string()))?;
@@ -70,6 +73,7 @@ pub fn load_texture_from_memory(gl: &glow::Context, bytes: &[u8]) -> Result<Text
     Texture2D::new(gl, width, height, &rgba)
 }
 
+/// Reads an image file from disk and uploads it into a GPU 2D texture.
 pub fn load_texture_file(gl: &glow::Context, path: impl AsRef<Path>) -> Result<Texture2D, OxideError> {
     let bytes = std::fs::read(path)?;
     load_texture_from_memory(gl, &bytes)

@@ -1,3 +1,5 @@
+//! Geometric collision detection, bounding volume hierarchies, contact manifolds, and raycasting.
+
 pub mod collider;
 pub mod manifold;
 pub mod ray;

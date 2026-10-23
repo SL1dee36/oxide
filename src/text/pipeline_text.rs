@@ -41,12 +41,14 @@ struct TextVertex {
     uv: [f32; 2],
 }
 
+/// Specialized graphics pipeline for rendering batched 2D text quads from a glyph texture atlas.
 pub struct PipelineText {
     shader: ShaderProgram,
     projection: Mat4,
 }
 
 impl PipelineText {
+    /// Compiles text vertex and fragment shaders.
     pub fn new(gl: &glow::Context) -> Result<Self, OxideError> {
         let shader = ShaderProgram::new(gl, VERTEX_SHADER_TEXT, FRAGMENT_SHADER_TEXT)?;
         Ok(Self {
@@ -55,6 +57,7 @@ impl PipelineText {
         })
     }
 
+    /// Sets up 2D screen orthographic projection and alpha blending for typography pass.
     pub fn begin(&mut self, gl: &glow::Context, screen_width: f32, screen_height: f32) {
         unsafe {
             gl.disable(glow::DEPTH_TEST);
@@ -76,6 +79,7 @@ impl PipelineText {
         self.shader.set_int(gl, "u_atlas", 0);
     }
 
+    /// Batches characters from `text` into quad vertices and submits a single draw call.
     pub fn draw_text(
         &self,
         gl: &glow::Context,
@@ -189,6 +193,7 @@ impl PipelineText {
         Ok(())
     }
 
+    /// Restores depth testing and disables blending upon pass completion.
     pub fn end(&self, gl: &glow::Context) {
         self.shader.unbind(gl);
         unsafe {
@@ -197,6 +202,7 @@ impl PipelineText {
         }
     }
 
+    /// Deallocates pipeline shaders from GPU memory.
     pub fn destroy(&self, gl: &glow::Context) {
         self.shader.destroy(gl);
     }

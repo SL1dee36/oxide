@@ -3,12 +3,14 @@ use fontdue::{Font as FontdueFont, FontSettings};
 use std::path::Path;
 use std::sync::Arc;
 
+/// Parsed vector font handle wrapping a [`fontdue::Font`] instance in an [`Arc`].
 #[derive(Clone)]
 pub struct Font {
     inner: Arc<FontdueFont>,
 }
 
 impl Font {
+    /// Parses font metadata and glyph outlines from an in-memory byte slice.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, OxideError> {
         let settings = FontSettings::default();
         let font = FontdueFont::from_bytes(bytes, settings)
@@ -18,17 +20,19 @@ impl Font {
         })
     }
 
+    /// Reads and parses a TTF/OTF font file from the filesystem.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, OxideError> {
         let bytes = std::fs::read(path.as_ref())?;
         Self::from_bytes(&bytes)
     }
 
+    /// Attempts to locate and load a default TrueType font, checking project assets then standard OS paths.
     pub fn default_font() -> Result<Self, OxideError> {
         let candidate_paths = [
-            "assets/fonts/arial.ttf",
-            "C:\\Windows\\Fonts\\segoeui.ttf",
-            "C:\\Windows\\Fonts\\arial.ttf",
+            "assets/fonts/DejaVuSans.ttf",
+            "C:\\Windows\\Fonts\\DejaVuSans.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "C:\\Windows\\Fonts\\segoeui.ttf",
             "/System/Library/Fonts/Helvetica.ttc",
         ];
 
@@ -45,6 +49,7 @@ impl Font {
         ))
     }
 
+    /// Returns a direct reference to the internal [`fontdue::Font`] structure.
     #[inline]
     pub fn inner(&self) -> &FontdueFont {
         &self.inner

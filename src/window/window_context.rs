@@ -11,14 +11,20 @@ use winit::dpi::LogicalSize;
 use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
+/// Encapsulates OS window handle, Glutin context, surface, and Glow OpenGL bindings.
 pub struct WindowContext {
+    /// Winit window reference.
     pub window: Window,
+    /// Active OpenGL context.
     pub gl_context: PossiblyCurrentContext,
+    /// Glutin window render surface.
     pub gl_surface: Surface<WindowSurface>,
+    /// Glow OpenGL API function table loaded from graphics driver.
     pub glow_gl: glow::Context,
 }
 
 impl WindowContext {
+    /// Creates a window and initializes an OpenGL 3.3 Core Profile graphics context.
     pub fn new(
         title: &str,
         width: u32,
@@ -96,6 +102,7 @@ impl WindowContext {
         })
     }
 
+    /// Resizes the underlying OpenGL surface when the OS window dimensions change.
     pub fn resize(&self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             self.gl_surface.resize(
@@ -106,6 +113,7 @@ impl WindowContext {
         }
     }
 
+    /// Swaps the front and back framebuffers, displaying rendered primitives on screen.
     pub fn swap_buffers(&self) -> Result<(), OxideError> {
         self.gl_surface
             .swap_buffers(&self.gl_context)

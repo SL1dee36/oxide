@@ -1,69 +1,106 @@
-# Module `ffi` — C-ABI Foreign Function Interface & Multi-Language Bindings
+# Subsystem `ffi` — C-ABI External Interface and Memory Model
 
-The `ffi` module delivers a stable C-compatible interface (`extern "C"`), enabling native application development in **Python**, **C**, **C++**, **C#**, **Zig**, and other environments.
+The `ffi` module exports a stable ANSI C99-compatible interface (`extern "C"`), enabling applications in C, C++, Python, C#, Zig, and any language with C ABI support to drive Oxide subsystems.
 
-Source files: [`src/ffi/`](file:///e:/PRJCT/Oxide/src/ffi/)  
-C/C++ Header: [`include/oxide.h`](file:///e:/PRJCT/Oxide/include/oxide.h)  
-Python Wrapper: [`bindings/python/oxide.py`](file:///e:/PRJCT/Oxide/bindings/python/oxide.py)
+Source code: [`src/ffi/`](../../src/ffi/)  
+C/C++ Header: [`include/oxide.h`](../../include/oxide.h)  
+Python Wrapper: [`bindings/python/oxide.py`](../../bindings/python/oxide.py)
 
 ---
 
-## 1. Building the Shared Library
+## 1. Ownership and Lifetime Memory Model
 
-To compile `oxide.dll` (Windows) or `liboxide.so` (Linux), run:
+Interaction across the FFI boundary adheres to explicit heap ownership rules:
 
-```bash
-cargo build --lib --release
+```mermaid
+flowchart TD
+    subgraph RustHeap [Rust Heap Allocation]
+        AppAlloc["oxide_app_create()<br/>Box::into_raw(Box::new(OxideApp))"]
+        SceneAlloc["oxide_scene_create()<br/>Box::into_raw(Box::new(OxideScene))"]
+    end
+
+    subgraph ClientCode [Client Runtime (C / Python)]
+        AppPtr["*mut OxideApp (Opaque Pointer)"]
+        ScenePtr["*mut OxideScene (Opaque Pointer)"]
+        CtxPtr["*mut OxideContext (Transient Reference)"]
+    end
+
+    AppAlloc --> AppPtr
+    SceneAlloc --> ScenePtr
+
+    AppPtr -->|"oxide_app_run(app, callbacks)"| AppConsumed["Box::from_raw(app) -> Deallocated upon loop exit"]
+    AppPtr -->|"oxide_app_destroy(app)<br/>(Only if run is never invoked)"| AppFreed["drop(Box::from_raw(app))"]
+    ScenePtr -->|"oxide_scene_destroy(scene)<br/>(Mandatory destructor)"| SceneFreed["drop(Box::from_raw(scene))"]
+
+    AppConsumed -.-> CtxPtr
+    NoteCtx["OxideContext is valid ONLY inside the callback body!"] -.-> CtxPtr
 ```
 
-The compiled shared binary is emitted to `target/release/`.
+### 1.1. Application Lifetime (`OxideApp`):
+- `oxide_app_create(title, width, height) -> *mut OxideApp` allocates the `OxideApp` structure on the Rust heap via `Box::into_raw` and returns an opaque pointer.
+- **Consumption on Execution:** `oxide_app_run(app, callbacks)` assumes ownership of the `app` pointer, reconstructs `Box::from_raw(app)`, and **automatically deallocates it** upon event loop termination.
+- **Manual Deallocation:** `oxide_app_destroy(app)` must be invoked **only if `oxide_app_run` was never called** (e.g., if startup was canceled). Invoking `oxide_app_destroy` after `oxide_app_run` is invalid and results in a double-free defect.
+
+### 1.2. Scene Graph Lifetime (`OxideScene`):
+- `oxide_scene_create() -> *mut OxideScene` allocates a scene graph container on the Rust heap.
+- The caller **is required to explicitly release the scene** via `oxide_scene_destroy(scene)` when it is no longer needed.
+
+### 1.3. Frame Context Lifetime (`OxideContext`):
+- Passed by raw pointer to `on_init`, `on_update`, and `on_render` callbacks.
+- Represents a transient stack reference within the frame loop. **Storing or accessing an `OxideContext` pointer outside the scope of the callback is strictly invalid**.
 
 ---
 
-## 2. Python Development
+## 2. Python Integration (`bindings/python/oxide.py`)
 
-The `bindings/python/oxide.py` layer operates via the standard library `ctypes` without requiring any external packages:
+The Python wrapper utilizes the standard `ctypes` module with zero third-party dependencies, implementing RAII deallocation via finalizers and context managers:
 
 ```python
-import sys
-sys.path.append("bindings/python")
-from oxide import App, Scene, Vec3, Vec2, Color, Transform
+from oxide import App, Scene, Vec3, Color, Transform
 
 class Simulation:
     def __init__(self):
+        # Scene.__del__ automatically invokes oxide_scene_destroy on garbage collection
         self.scene = Scene()
         self.cube = None
 
     def on_init(self, ctx):
         self.scene.set_camera_perspective(
-            fov_deg=60.0, aspect=ctx.aspect_ratio, near=0.1, far=100.0,
-            eye=Vec3(0, 3, 8), target=Vec3(0, 0, 0)
+            fov_deg=60.0,
+            aspect=ctx.aspect_ratio,
+            near=0.1,
+            far=100.0,
+            eye=Vec3(0.0, 3.0, 8.0),
+            target=Vec3(0.0, 0.0, 0.0),
         )
-        self.cube = self.scene.spawn_cube_3d(1.5, Transform.from_xyz(-1.2, 0, 0))
+        self.cube = self.scene.spawn_cube_3d(1.5, Transform.from_xyz(0.0, 0.0, 0.0))
 
     def on_update(self, ctx, dt):
         self.scene.node_rotate_y(self.cube, 1.2 * dt)
         self.scene.update(ctx, dt)
 
     def on_render(self, ctx):
-        ctx.clear(Color(0.08, 0.09, 0.12))
+        ctx.clear(Color(0.08, 0.10, 0.14))
         self.scene.render(ctx)
 
 if __name__ == "__main__":
-    app = App(title="Python Oxide Simulation", width=1280, height=720)
+    app = App(title="Oxide Python Workspace", width=1280, height=720)
     app.run(Simulation())
 ```
 
-Execute with:
-```bash
-python examples/python_simulation.py
+### Scene Context Manager:
+```python
+with Scene() as scene:
+    cube = scene.spawn_cube_3d(1.0)
+    # scene.destroy() is automatically executed when exiting the with block
 ```
 
 ---
 
-## 3. C / C++ Development
+## 3. C / C++ Integration
 
-Include `oxide.h` and link against `oxide.lib` / `oxide.dll`:
+Header file: [`include/oxide.h`](../../include/oxide.h)  
+Example application: [`examples/c_app/main.c`](../../examples/c_app/main.c)
 
 ```c
 #include "oxide.h"
@@ -96,7 +133,7 @@ void on_update(OxideContext* ctx, float dt, void* user_data) {
 
 void on_render(OxideContext* ctx, void* user_data) {
     UserApp* app = (UserApp*)user_data;
-    OxideColor clear_col = {0.08f, 0.09f, 0.12f, 1.0f};
+    OxideColor clear_col = {0.08f, 0.10f, 0.14f, 1.0f};
     oxide_context_clear(ctx, clear_col);
     oxide_scene_render(app->scene, ctx);
 }
@@ -112,7 +149,10 @@ int main(void) {
         .user_data = &user_app
     };
 
+    // oxide_app_run consumes and frees the app pointer
     int result = oxide_app_run(app, callbacks);
+
+    // Explicit deallocation of the scene graph
     oxide_scene_destroy(user_app.scene);
     return result;
 }
@@ -120,18 +160,23 @@ int main(void) {
 
 ---
 
-## 4. C Function API Specification
+## 4. Building the C Example
 
-| Function | Description |
-| :--- | :--- |
-| `oxide_app_create(title, w, h)` | Allocates heap application instance |
-| `oxide_app_run(app, callbacks)` | Starts window and event loop, invoking C function pointers |
-| `oxide_scene_create()` | Allocates an independent scene graph |
-| `oxide_scene_spawn_cube_3d(scene, size, transform)` | Spawns a 3D cube node with Box3D collider |
-| `oxide_scene_spawn_sphere_3d(scene, radius, transform)` | Spawns a 3D sphere node with Sphere collider |
-| `oxide_scene_spawn_surface_2d(scene, size, color, transform)` | Spawns a 2D planar surface node |
-| `oxide_scene_spawn_text_2d(scene, text, color, scale, transform)` | Spawns a 2D text node |
-| `oxide_scene_check_collision(scene, id_a, id_b, out_contact)` | Returns `true` if volumes intersect, outputting contact info |
-| `oxide_scene_resolve_penetration(scene, id_a, id_b, contact)` | Kinematically pushes overlapping bodies apart |
-| `oxide_context_clear(ctx, color)` | Clears framebuffer color and depth targets |
-| `oxide_context_get_fps(ctx)` | Retrieves smoothed FPS metric |
+### Compile Shared Library:
+```bash
+cargo build --release
+```
+
+### Build via CMake:
+```bash
+cd examples/c_app
+cmake -B build
+cmake --build build --config Release
+```
+
+### Build via Makefile:
+```bash
+cd examples/c_app
+make
+./c_app
+```

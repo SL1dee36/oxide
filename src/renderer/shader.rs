@@ -1,11 +1,13 @@
 use crate::core::error::OxideError;
 use glow::HasContext;
 
+/// OpenGL shader program managing compilation, linking, and uniform updates.
 pub struct ShaderProgram {
     id: glow::Program,
 }
 
 impl ShaderProgram {
+    /// Compiles vertex and fragment shaders and links them into an executable program.
     pub fn new(
         gl: &glow::Context,
         vertex_source: &str,
@@ -73,6 +75,7 @@ impl ShaderProgram {
         Ok(shader)
     }
 
+    /// Activates the shader program for subsequent draw calls (`glUseProgram`).
     #[inline]
     pub fn bind(&self, gl: &glow::Context) {
         unsafe {
@@ -80,6 +83,7 @@ impl ShaderProgram {
         }
     }
 
+    /// Deactivates active shader program.
     #[inline]
     pub fn unbind(&self, gl: &glow::Context) {
         unsafe {
@@ -87,6 +91,7 @@ impl ShaderProgram {
         }
     }
 
+    /// Uploads a 4x4 matrix uniform value.
     pub fn set_mat4(&self, gl: &glow::Context, name: &str, matrix: &glam::Mat4) {
         unsafe {
             if let Some(loc) = gl.get_uniform_location(self.id, name) {
@@ -95,6 +100,7 @@ impl ShaderProgram {
         }
     }
 
+    /// Uploads a 3-component vector uniform value.
     pub fn set_vec3(&self, gl: &glow::Context, name: &str, vec: glam::Vec3) {
         unsafe {
             if let Some(loc) = gl.get_uniform_location(self.id, name) {
@@ -103,6 +109,7 @@ impl ShaderProgram {
         }
     }
 
+    /// Uploads a 4-component vector uniform value.
     pub fn set_vec4(&self, gl: &glow::Context, name: &str, vec: glam::Vec4) {
         unsafe {
             if let Some(loc) = gl.get_uniform_location(self.id, name) {
@@ -111,6 +118,7 @@ impl ShaderProgram {
         }
     }
 
+    /// Uploads a single 32-bit floating-point scalar uniform.
     pub fn set_float(&self, gl: &glow::Context, name: &str, value: f32) {
         unsafe {
             if let Some(loc) = gl.get_uniform_location(self.id, name) {
@@ -119,6 +127,7 @@ impl ShaderProgram {
         }
     }
 
+    /// Uploads a 32-bit signed integer uniform (e.g. sampler binding unit).
     pub fn set_int(&self, gl: &glow::Context, name: &str, value: i32) {
         unsafe {
             if let Some(loc) = gl.get_uniform_location(self.id, name) {
@@ -127,6 +136,7 @@ impl ShaderProgram {
         }
     }
 
+    /// Deallocates the shader program from GPU memory.
     pub fn destroy(&self, gl: &glow::Context) {
         unsafe {
             gl.delete_program(self.id);

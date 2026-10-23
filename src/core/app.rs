@@ -8,15 +8,23 @@ use winit::event::{ElementState, Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
 
+/// Application lifecycle callback interface implemented by user simulation and runtime handlers.
 pub trait AppHandler {
+    /// Invoked once after OpenGL context initialization prior to entering the event loop.
     fn on_init(&mut self, _ctx: &mut Context) {}
+    /// Invoked every frame before rendering; receives frame duration `_dt` in seconds.
     fn on_update(&mut self, _ctx: &mut Context, _dt: f32) {}
+    /// Invoked every frame to submit draw commands to graphics pipelines.
     fn on_render(&mut self, _ctx: &mut Context) {}
 }
 
+/// Window and display configuration parameters.
 pub struct AppConfig {
+    /// Text displayed in the OS window title bar.
     pub title: String,
+    /// Initial logical window width in pixels.
     pub width: u32,
+    /// Initial logical window height in pixels.
     pub height: u32,
 }
 
@@ -30,28 +38,33 @@ impl Default for AppConfig {
     }
 }
 
+/// Builder pattern for configuring and launching an engine runtime application instance.
 pub struct AppBuilder {
     config: AppConfig,
 }
 
 impl AppBuilder {
+    /// Creates a builder instance initialized with default window settings (1280x720, "Oxide Runtime").
     pub fn new() -> Self {
         Self {
             config: AppConfig::default(),
         }
     }
 
+    /// Sets the window title string.
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.config.title = title.into();
         self
     }
 
+    /// Sets the initial window dimensions in pixels.
     pub fn with_size(mut self, width: u32, height: u32) -> Self {
         self.config.width = width;
         self.config.height = height;
         self
     }
 
+    /// Initializes OS window, OpenGL 3.3 Core context, and executes the blocking event/frame loop.
     pub fn run<H: AppHandler + 'static>(self, mut handler: H) -> Result<(), OxideError> {
         let event_loop = EventLoop::new().map_err(|e| OxideError::WindowCreation(e.to_string()))?;
         event_loop.set_control_flow(ControlFlow::Poll);
@@ -159,9 +172,11 @@ impl Default for AppBuilder {
     }
 }
 
+/// Static factory providing entry points for configuring applications.
 pub struct App;
 
 impl App {
+    /// Starts construction of an [`AppBuilder`] instance.
     pub fn build() -> AppBuilder {
         AppBuilder::new()
     }

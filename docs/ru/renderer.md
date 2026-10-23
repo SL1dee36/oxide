@@ -1,75 +1,122 @@
-# Модуль `renderer` — Графический бэкенд и пайплайны OpenGL
+# Модуль `renderer` — Графические конвейеры и ресурсы видеопамяти
 
-Модуль `renderer` инкапсулирует вызовы OpenGL 3.3 Core Profile, компиляцию шейдеров GLSL, распределение GPU-буферов и конвейеры отрисовки для 3D и 2D графики.
+Модуль `renderer` реализует низкоуровневые графические конвейеры OpenGL 3.3 Core Profile, компиляцию шейдерных программ GLSL, аллокацию буферов GPU и управление ресурсами текстур.
 
-Исходный код: [`src/renderer/`](file:///e:/PRJCT/Oxide/src/renderer/)
+Исходный код: [`src/renderer/`](../../src/renderer/)
 
 ---
 
-## 1. Конвейер 3D-графики (`Pipeline3D`)
+## 1. Разделение данных ОЗУ и ресурсов видеопамяти GPU
 
-`Pipeline3D` отвечает за рендеринг полигональных сеток с освещением и проверкой глубины.
+В архитектуре Oxide действует строгое разграничение между данными геометрии и изображений в оперативной памяти (модуль `assets`) и аллоцированными объектами видеопамяти (модуль `renderer`):
 
-### Особенности реализации:
-- **Шейдерная модель:** Вершинный и фрагментный шейдеры GLSL 330 core.
-- **Освещение:** Модель Ламберта/Блинна-Фонга с направленным источником света (`u_light_dir`, `u_light_color`) и фоновым рассеянным светом (`u_ambient_color`).
-- **Матрица нормалей:** Автоматический расчет `mat3(transpose(inverse(u_model)))` в шейдере для корректного преобразования нормалей при неравномерном масштабировании.
-- **Буфер глубины:** Автоматическое включение `GL_DEPTH_TEST` с функцией `GL_LEQUAL`.
+```mermaid
+graph LR
+    subgraph RAM [Оперативная память (ОЗУ) - assets]
+        HostMesh["assets::Mesh3D<br/>(Vec<Vertex3D>, Vec<u32>)"]
+        HostSurface["assets::Surface2D<br/>(Vec2 size, Color)"]
+        RawImage["Декодированный буфер<br/>(Vec<u8> RGBA)"]
+    end
 
-### Структура `Light3D`:
+    subgraph VRAM [Видеопамять GPU (VRAM) - renderer]
+        VAO["renderer::VertexArray<br/>(glGenVertexArrays)"]
+        VBO["renderer::VertexBuffer<br/>(GL_ARRAY_BUFFER)"]
+        EBO["renderer::IndexBuffer<br/>(GL_ELEMENT_ARRAY_BUFFER)"]
+        Texture["renderer::Texture2D<br/>(GL_TEXTURE_2D)"]
+    end
+
+    HostMesh -->|"ensure_gpu_buffers(gl)"| VAO & VBO & EBO
+    RawImage -->|"Texture2D::new(gl, ...)"| Texture
+```
+
+---
+
+## 2. Буферы данных видеопамяти (`buffer.rs`)
+
+| Тип | Описание | Основные методы |
+| :--- | :--- | :--- |
+| `Vertex3D` | Структура вершины `#[repr(C)]`: `position: [f32; 3]`, `normal: [f32; 3]`, `uv: [f32; 2]`. Размер: 32 байта. | `new(pos, normal, uv)` |
+| `VertexArray` | Инкапсулирует OpenGL VAO (`glGenVertexArrays`). Связывает формат атрибутов и привязку буферов. | `new(gl)`, `bind(gl)`, `unbind(gl)`, `destroy(gl)` |
+| `VertexBuffer` | Инкапсулирует VBO (`GL_ARRAY_BUFFER`, `GL_STATIC_DRAW`). Хранит непрерывный массив вершин. | `new<T>(gl, data: &[T])`, `bind(gl)`, `unbind(gl)`, `count()`, `destroy(gl)` |
+| `IndexBuffer` | Инкапсулирует EBO (`GL_ELEMENT_ARRAY_BUFFER`, `GL_STATIC_DRAW`). Хранит индексы треугольников `u32`. | `new(gl, indices: &[u32])`, `bind(gl)`, `unbind(gl)`, `count()`, `destroy(gl)` |
+
+---
+
+## 3. Шейдерные программы (`ShaderProgram`)
+
+Класс `ShaderProgram` управляет компиляцией вершинных и фрагментных шейдеров GLSL 330 core и передачей uniform-переменных:
+
 ```rust
-pub struct Light3D {
-    pub direction: Vec3,
-    pub color: Vec3,
-    pub ambient: Vec3,
+pub struct ShaderProgram { /* id: glow::Program */ }
+```
+
+### Методы передачи параметров:
+- `set_mat4(gl, name: &str, matrix: &Mat4)` — передача матрицы 4x4 (`glUniformMatrix4fv`).
+- `set_vec3(gl, name: &str, vec: Vec3)` — передача 3D-вектора (`glUniform3f`).
+- `set_vec4(gl, name: &str, vec: Vec4)` — передача 4D-вектора/цвета (`glUniform4f`).
+- `set_float(gl, name: &str, value: f32)` — передача скаляра `f32`.
+- `set_int(gl, name: &str, value: i32)` — передача целочисленного значения (например, номера текстурного слота).
+
+---
+
+## 4. Текстуры GPU (`Texture2D`)
+
+Структура `Texture2D` инкапсулирует объект `GL_TEXTURE_2D` с трилинейной фильтрацией и мипмапами:
+- `Texture2D::new(gl, width, height, pixels: &[u8]) -> Result<Self, OxideError>` — выделяет текстуру, загружает RGBA8 пиксели и генерирует мипмапы (`glGenerateMipmap`).
+- `Texture2D::white(gl) -> Result<Self, OxideError>` — создает белую текстуру 1x1 для отображения объектов без пользовательской карты текстуры.
+- `bind(&self, gl, slot: u32)` — активирует текстурный юнит `GL_TEXTURE0 + slot` и привязывает текстуру.
+- `destroy(&self, gl)` — освобождает ресурс в видеопамяти (`glDeleteTextures`).
+
+---
+
+## 5. Графический конвейер 3D (`Pipeline3D`)
+
+`Pipeline3D` выполняет отрисовку полигональных сеток с перспективной проекцией, глубиной и направленным освещением:
+
+```rust
+pub struct Pipeline3D {
+    pub light: Light3D,
 }
 ```
 
----
+### Модель освещения:
+- **Направленный свет (`Light3D`):**
+  $$\mathbf{I} = \mathbf{I}_{\text{ambient}} + \max(\mathbf{N} \cdot \mathbf{L}, 0.0) \cdot \mathbf{I}_{\text{light}}$$
+  $$\mathbf{C}_{\text{final}} = \mathbf{C}_{\text{albedo}} \cdot \mathbf{I} + \mathbf{C}_{\text{emissive}}$$
+- **Матрица нормалей:** Вычисляется в вершинном шейдере как `mat3(transpose(inverse(u_model)))` для предотвращения искажения нормалей при неравномерном масштабировании.
 
-## 2. Конвейер 2D-графики (`Pipeline2D`)
-
-`Pipeline2D` предназначен для плоских панелей, оверлеев и элементов интерфейса в пиксельных экранных координатах.
-
-### Особенности реализации:
-- **Ортографическая проекция:** Начало координат `(0, 0)` находится в верхнем левом углу экрана, ось X направлена вправо, ось Y — вниз.
-- **Альфа-блендинг:** `gl.enable(GL_BLEND)` с функцией `gl.blend_func(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)`.
-- **Общий единичный квад:** Вершины `[0,0]`, `[1,0]`, `[1,1]`, `[0,1]` переиспользуются для всех 2D-элементов, масштабируясь через модельную матрицу.
-
----
-
-## 3. Управление шейдерами (`ShaderProgram`)
-
-Класс `ShaderProgram` автоматизирует компиляцию этапов и линковку программы с детальной диагностикой ошибок:
-
+### Сигнатуры конвейера:
 ```rust
-let shader = ShaderProgram::new(gl, vertex_glsl, fragment_glsl)?;
+// 1. Активация конвейера, передача матриц вида/проекции и параметров света
+pub fn begin(&self, gl: &glow::Context, view: &Mat4, projection: &Mat4);
 
-shader.bind(gl);
-shader.set_mat4(gl, "u_model", &matrix);
-shader.set_vec4(gl, "u_color", color.to_vec4());
-shader.set_int(gl, "u_texture", 0);
-shader.unbind(gl);
+// 2. Отрисовка полигонального меша
+pub fn draw(
+    &self,
+    gl: &glow::Context,
+    model: &Mat4,
+    albedo: Color,
+    emissive: Color,
+    texture: Option<&Texture2D>,
+    vao: &VertexArray,
+    ebo: &IndexBuffer,
+);
+
+// 3. Завершение прохода
+pub fn end(&self, gl: &glow::Context);
 ```
 
 ---
 
-## 4. Буферы данных GPU (`buffer.rs`)
+## 6. Графический конвейер 2D (`Pipeline2D`)
 
-Абстракции над низкоуровневыми объектами OpenGL с RAII-деструкцией:
+`Pipeline2D` предназначен для вывода плоских панелей и интерфейсных поверхностей:
+- **Координатная система:** Ортографическая проекция с началом координат $(0, 0)$ в левом верхнем углу, оси: $X \in [0, \text{width}]$, $Y \in [0, \text{height}]$ направлена вниз.
+- **Альфа-блендинг:** `gl.enable(GL_BLEND)` с функцией `gl.blend_func(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)`.
+- **Единичный квад:** Вершины `[0,0]`, `[1,0]`, `[1,1]`, `[0,1]` хранятся в статическом VBO/EBO пайплайна и масштабируются через модельную матрицу.
 
-| Структура | Описание |
-| :--- | :--- |
-| `Vertex3D` | Вершина с полями `position: [f32; 3]`, `normal: [f32; 3]`, `uv: [f32; 2]` (`repr(C)`) |
-| `VertexArray` | Обертка над OpenGL VAO (`glGenVertexArrays`) |
-| `VertexBuffer` | Обертка над VBO (`GL_ARRAY_BUFFER`, `GL_STATIC_DRAW`) |
-| `IndexBuffer` | Обертка над EBO (`GL_ELEMENT_ARRAY_BUFFER`) для индексной отрисовки треугольников |
-
----
-
-## 5. Текстуры GPU (`Texture2D`)
-
-Структура `Texture2D` инкапсулирует `GL_TEXTURE_2D`:
-- Поддержка линейной фильтрации с трилинейной мипмап-фильтрацией (`GL_LINEAR_MIPMAP_LINEAR`).
-- Встроенный метод `Texture2D::white(gl)` создает 1x1 белую текстуру, используемую по умолчанию для нетекстурированных материалов.
-- Метод `bind(gl, slot)` активирует нужный текстурный слот (`GL_TEXTURE0 + slot`).
+```rust
+pub fn begin(&mut self, gl: &glow::Context, screen_width: f32, screen_height: f32);
+pub fn draw(&self, gl: &glow::Context, model: &Mat4, color: Color, texture: Option<&Texture2D>);
+pub fn end(&self, gl: &glow::Context);
+```

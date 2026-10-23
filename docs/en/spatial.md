@@ -1,94 +1,115 @@
-# Module `spatial` — Scene Graph, Nodes & Transformations
+# Subsystem `spatial` — Hierarchical Scene Graph, Nodes, and Cameras
 
-The `spatial` module implements a hierarchical node tree (conceptually modeled after Godot's node architecture), TRS spatial mathematics, and camera projections.
+The `spatial` module provides a hierarchical scene graph (Node Graph), cascading spatial transform evaluation (TRS), and perspective/orthographic camera projection models.
 
-Source files: [`src/spatial/`](file:///e:/PRJCT/Oxide/src/spatial/)
+Source code: [`src/spatial/`](../../src/spatial/)
 
 ---
 
-## 1. Spatial Transformation (`Transform`)
+## 1. Spatial Transformations (`Transform`)
 
-The `Transform` struct stores the local spatial state: Position (`translation: Vec3`), Orientation (`rotation: Quat`), and Scale (`scale: Vec3`).
+`Transform` represents the local spatial state of an entity in 3D Cartesian space:
 
 ```rust
-// Construction
-let mut transform = Transform::from_translation(Vec3::new(0.0, 2.0, -5.0));
-
-// Manipulation
-transform.rotate_y(1.5 * dt);
-transform.rotate_x(0.5 * dt);
-transform.translate(Vec3::new(0.1, 0.0, 0.0));
-
-// 4x4 Model Matrix
-let mat: Mat4 = transform.matrix();
+pub struct Transform {
+    pub translation: glam::Vec3,
+    pub rotation: glam::Quat,
+    pub scale: glam::Vec3,
+}
 ```
+
+- **Model Matrix:** `transform.matrix() -> Mat4` evaluates the $4 \times 4$ affine matrix via $M = T \cdot R \cdot S$.
+- **Incremental Rotation:** `rotate_x(rad)`, `rotate_y(rad)`, and `rotate_z(rad)` multiply the current quaternion by an incremental rotation.
+- **Euler Angles:** `set_euler_angles(x_rad, y_rad, z_rad)` configures orientation using YXZ convention.
 
 ---
 
-## 2. Camera System (`Camera`)
+## 2. Viewing Cameras and Projections (`Camera`, `Projection`)
 
-Supports perspective and orthographic camera projections:
+`Camera` combines spatial pose (`transform: Transform`) with geometric projection configuration (`projection: Projection`):
 
 ```rust
-// Perspective 3D Camera
-let mut camera = Camera::perspective(60.0, ctx.aspect_ratio(), 0.1, 100.0);
-camera.look_at(
-    Vec3::new(0.0, 5.0, 10.0), // Eye location
-    Vec3::new(0.0, 0.0, 0.0),  // Target focus point
-    Vec3::Y,                   // Up direction
-);
-
-// View and Projection matrices
-let view = camera.view_matrix();
-let proj = camera.projection_matrix(ctx.aspect_ratio());
+pub enum Projection {
+    Perspective {
+        fov_y_rad: f32,
+        z_near: f32,
+        z_far: f32,
+    },
+    Orthographic {
+        half_width: f32,
+        half_height: f32,
+        z_near: f32,
+        z_far: f32,
+    },
+}
 ```
+
+### Key `Camera` Methods:
+- `Camera::perspective(fov_y_deg, aspect, z_near, z_far)` — Constructs a perspective camera with field-of-view in degrees.
+- `Camera::orthographic(width, height, z_near, z_far)` — Constructs an orthographic camera with specified view bounds.
+- `look_at(eye: Vec3, target: Vec3, up: Vec3)` — Computes rotation and position to orient the camera toward a target.
+- `view_matrix() -> Mat4` — Returns right-handed view matrix (inverse of camera's world transform).
+- `projection_matrix(aspect_ratio: f32) -> Mat4` — Evaluates right-handed OpenGL projection matrix for the given aspect ratio.
 
 ---
 
-## 3. Node Hierarchy (`SpatialNode`)
+## 3. Spatial Node (`SpatialNode`)
 
-All scene entities are structured as a `SpatialNode`:
-- `id: NodeId`: Unique identifier within the scene.
-- `parent: Option<NodeId>`: Parent node index.
-- `children: Vec<NodeId>`: Array of attached child node IDs.
-- `transform: Transform`: Local transform relative to parent.
-- `global_transform: Mat4`: Cached world space transformation matrix.
-- `kind: NodeKind`:
-  - `Empty`: Anchor/grouping transform node.
-  - `Mesh3D(Mesh3D)`: 3D geometry node.
-  - `Surface2D(Surface2D)`: 2D planar element.
-  - `Text2D(Text2D)`: 2D typography element.
-- `collider: Option<Collider>`: Bounding shape for spatial intersection tests.
-- `behavior: Option<Box<dyn NodeBehavior>>`: Custom processing callback.
+Entities in the scene graph are instances of `SpatialNode`:
 
-### The `NodeBehavior` Trait:
+```rust
+pub struct SpatialNode {
+    pub id: NodeId,
+    pub name: String,
+    pub parent: Option<NodeId>,
+    pub children: Vec<NodeId>,
+    pub transform: Transform,
+    pub global_transform: Mat4,
+    pub kind: NodeKind,
+    pub collider: Option<Collider>,
+    pub visible: bool,
+    pub is_static: bool,
+    pub behavior: Option<Box<dyn NodeBehavior>>,
+}
+```
+
+### Node Payloads (`NodeKind`):
+- `NodeKind::Empty` — Structural pivot, group anchor, or kinematic joint.
+- `NodeKind::Mesh3D(Mesh3D)` — 3D polygonal mesh geometry.
+- `NodeKind::Surface2D(Surface2D)` — Planar quad panel in screen coordinates.
+- `NodeKind::Text2D(Text2D)` — Screen-space typography element.
+
+### Procedural Behaviors (`NodeBehavior`):
+Trait for attaching per-frame logic to individual nodes:
 ```rust
 pub trait NodeBehavior {
-    fn on_process(&mut self, node: &mut SpatialNode, ctx: &mut Context, dt: f32) {}
+    fn on_process(&mut self, node: &mut SpatialNode, ctx: &mut Context, dt: f32);
 }
 ```
 
 ---
 
-## 4. Scene Graph Container (`Scene`)
+## 4. Scene Graph (`Scene`)
 
-`Scene` coordinates node lifetimes, hierarchy tree propagation, and rendering passes:
+`Scene` coordinates node hierarchies, lighting parameters, active camera, and update passes:
 
-### Transform Cascading:
-Calling `scene.update_transforms()` recursively computes global world matrices:
-$$\text{global\_transform}_{\text{child}} = \text{global\_transform}_{\text{parent}} \times \text{local\_matrix}_{\text{child}}$$
+### Cascading Transform Propagation:
+`update_transforms()` recursively traverses the hierarchy from root nodes:
+$$M_{\text{global}}(\text{child}) = M_{\text{global}}(\text{parent}) \times M_{\text{local}}(\text{child})$$
+For root nodes (`parent == None`), the global matrix directly equals `transform.matrix()`.
 
-### Spawning Nodes:
+### Spawning and Hierarchical Linking:
 ```rust
-let cube_id = scene.spawn_mesh_3d(mesh, transform, collider);
-let panel_id = scene.spawn_surface_2d(surface, transform, collider);
-let text_id = scene.spawn_text_2d(text, transform);
+let parent_id = scene.spawn_node("Anchor", NodeKind::Empty, Transform::from_xyz(0.0, 5.0, 0.0), None);
+let mesh_id = scene.spawn_mesh_3d(Mesh3D::cube(1.0), Transform::IDENTITY, Collider::box_3d(Vec3::ONE));
 
-// Parenting
-scene.attach_child(parent_id, child_id);
+// Link parent-child relationship
+scene.attach_child(parent_id, mesh_id);
 ```
 
-### Spatial Queries:
-- `scene.check_intersection(node_a, node_b) -> Option<ContactManifold>`: Evaluates collider overlaps.
-- `scene.resolve_penetration(node_a, node_b, &contact)`: Kinematically separates overlapping nodes along the contact normal.
-- `scene.raycast(&ray) -> Option<(NodeId, RaycastHit)>`: Identifies the closest node intersected by a 3D ray.
+### Scene Operations:
+- `scene.update(ctx, dt)` — Updates world transform matrices and runs attached `NodeBehavior` callbacks.
+- `scene.render(ctx)` — Submits 3D mesh, 2D surface, and 2D text render passes.
+- `scene.check_intersection(id_a, id_b)` — Evaluates geometric overlap between node colliders.
+- `scene.resolve_penetration(id_a, id_b, &contact)` — Kinematically separates intersecting nodes.
+- `scene.raycast(&ray)` — Performs closest-hit raycasting through all colliders in the scene.

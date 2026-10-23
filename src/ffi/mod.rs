@@ -1,3 +1,16 @@
+//! C-compatible Foreign Function Interface (FFI) exports.
+//!
+//! Exposes an ANSI C99 compatible ABI (`extern "C"`) allowing C, C++, Python,
+//! and other languages to drive windowing, scenes, collision detection, and rendering.
+//!
+//! # Ownership and Lifetime Model
+//! - Heap allocations returned as opaque pointers (`*mut OxideApp`, `*mut OxideScene`) are managed
+//!   via [`Box::into_raw`].
+//! - Callers must release scenes with `oxide_scene_destroy`.
+//! - Applications not executed via `oxide_app_run` must be released with `oxide_app_destroy`.
+//!   Calling `oxide_app_run` consumes and deallocates the `OxideApp` instance upon event loop termination.
+//! - `OxideContext` is a transient per-callback reference and must not be stored or used outside the callback scope.
+
 use crate::core::app::{App, AppHandler};
 use crate::core::color::Color;
 use crate::core::context::Context;
@@ -13,6 +26,7 @@ use crate::collision::manifold::ContactManifold;
 use glam::{Quat, Vec2, Vec3};
 use std::ffi::{c_char, c_void, CStr};
 
+/// C-compatible 2D vector.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct OxideVec2 {
@@ -32,6 +46,7 @@ impl From<Vec2> for OxideVec2 {
     }
 }
 
+/// C-compatible 3D vector.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct OxideVec3 {
@@ -52,6 +67,7 @@ impl From<Vec3> for OxideVec3 {
     }
 }
 
+/// C-compatible 4-component orientation quaternion.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct OxideQuat {
@@ -73,6 +89,7 @@ impl From<Quat> for OxideQuat {
     }
 }
 
+/// C-compatible 4-component RGBA color [0.0, 1.0].
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct OxideColor {
@@ -94,6 +111,7 @@ impl From<Color> for OxideColor {
     }
 }
 
+/// C-compatible 3D affine transformation structure.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct OxideTransform {
@@ -122,6 +140,7 @@ impl From<Transform> for OxideTransform {
     }
 }
 
+/// C-compatible contact manifold describing collision penetration and separation vector.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct OxideContact {
@@ -146,14 +165,19 @@ impl From<OxideContact> for ContactManifold {
     }
 }
 
+/// Opaque wrapper around per-frame [`Context`].
 pub struct OxideContext {
     ctx: *mut Context<'static>,
 }
 
+/// Initialization callback invoked once when OpenGL is ready.
 pub type OxideInitFn = Option<extern "C" fn(ctx: *mut OxideContext, user_data: *mut c_void)>;
+/// Update callback invoked every frame before rendering.
 pub type OxideUpdateFn = Option<extern "C" fn(ctx: *mut OxideContext, dt: f32, user_data: *mut c_void)>;
+/// Render callback invoked every frame to submit draw commands.
 pub type OxideRenderFn = Option<extern "C" fn(ctx: *mut OxideContext, user_data: *mut c_void)>;
 
+/// C-compatible callback table passed to [`oxide_app_run`].
 #[repr(C)]
 pub struct OxideCallbacks {
     pub on_init: OxideInitFn,
@@ -162,12 +186,14 @@ pub struct OxideCallbacks {
     pub user_data: *mut c_void,
 }
 
+/// Opaque application configuration container allocated on heap.
 pub struct OxideApp {
     pub title: String,
     pub width: u32,
     pub height: u32,
 }
 
+/// Opaque scene graph container allocated on heap.
 pub struct OxideScene {
     pub inner: Scene,
 }
@@ -205,7 +231,11 @@ impl AppHandler for FfiAppHandler {
     }
 }
 
-// App API
+// ==========================================
+// App Lifecycle API
+// ==========================================
+
+/// Allocates an [`OxideApp`] on the heap with specified window title and resolution.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_app_create(
     title: *const c_char,
@@ -225,6 +255,7 @@ pub unsafe extern "C" fn oxide_app_create(
     }))
 }
 
+/// Releases an unexecuted [`OxideApp`] from the heap. Do not call if passed to [`oxide_app_run`].
 #[no_mangle]
 pub unsafe extern "C" fn oxide_app_destroy(app: *mut OxideApp) {
     if !app.is_null() {
@@ -232,6 +263,7 @@ pub unsafe extern "C" fn oxide_app_destroy(app: *mut OxideApp) {
     }
 }
 
+/// Starts the window event loop. Takes ownership of `app` and deallocates it upon completion.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_app_run(
     app: *mut OxideApp,
@@ -255,7 +287,11 @@ pub unsafe extern "C" fn oxide_app_run(
     }
 }
 
+// ==========================================
 // Context API
+// ==========================================
+
+/// Clears color and depth buffer attachments with specified RGBA color.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_context_clear(ctx: *mut OxideContext, color: OxideColor) {
     if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
@@ -263,6 +299,7 @@ pub unsafe extern "C" fn oxide_context_clear(ctx: *mut OxideContext, color: Oxid
     }
 }
 
+/// Returns measured frames per second.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_context_get_fps(ctx: *mut OxideContext) -> f32 {
     if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
@@ -272,6 +309,7 @@ pub unsafe extern "C" fn oxide_context_get_fps(ctx: *mut OxideContext) -> f32 {
     }
 }
 
+/// Returns time elapsed during the previous frame in seconds ($\Delta t$).
 #[no_mangle]
 pub unsafe extern "C" fn oxide_context_get_delta_time(ctx: *mut OxideContext) -> f32 {
     if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
@@ -281,6 +319,7 @@ pub unsafe extern "C" fn oxide_context_get_delta_time(ctx: *mut OxideContext) ->
     }
 }
 
+/// Returns active viewport aspect ratio (`width / height`).
 #[no_mangle]
 pub unsafe extern "C" fn oxide_context_get_aspect_ratio(ctx: *mut OxideContext) -> f32 {
     if let Some(c) = ctx.as_mut().and_then(|x| x.ctx.as_mut()) {
@@ -290,7 +329,11 @@ pub unsafe extern "C" fn oxide_context_get_aspect_ratio(ctx: *mut OxideContext) 
     }
 }
 
-// Scene API
+// ==========================================
+// Scene Graph API
+// ==========================================
+
+/// Allocates an empty [`OxideScene`] on the heap. Must be released with [`oxide_scene_destroy`].
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_create() -> *mut OxideScene {
     Box::into_raw(Box::new(OxideScene {
@@ -298,6 +341,7 @@ pub unsafe extern "C" fn oxide_scene_create() -> *mut OxideScene {
     }))
 }
 
+/// Deallocates an [`OxideScene`] previously created via [`oxide_scene_create`].
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_destroy(scene: *mut OxideScene) {
     if !scene.is_null() {
@@ -305,6 +349,7 @@ pub unsafe extern "C" fn oxide_scene_destroy(scene: *mut OxideScene) {
     }
 }
 
+/// Configures the scene's 3D perspective camera with look-at target.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_set_camera_perspective(
     scene: *mut OxideScene,
@@ -322,6 +367,7 @@ pub unsafe extern "C" fn oxide_scene_set_camera_perspective(
     }
 }
 
+/// Spawns a 3D cube mesh with matching box collider, returning its numeric node identifier.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_spawn_cube_3d(
     scene: *mut OxideScene,
@@ -340,6 +386,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_cube_3d(
     }
 }
 
+/// Spawns a 3D UV sphere mesh with matching sphere collider, returning its numeric node identifier.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_spawn_sphere_3d(
     scene: *mut OxideScene,
@@ -358,6 +405,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_sphere_3d(
     }
 }
 
+/// Spawns a 2D rectangular surface in screen coordinates with box collider, returning its node identifier.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_spawn_surface_2d(
     scene: *mut OxideScene,
@@ -377,6 +425,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_surface_2d(
     }
 }
 
+/// Spawns a 2D typography text element, returning its numeric node identifier.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_spawn_text_2d(
     scene: *mut OxideScene,
@@ -404,6 +453,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_text_2d(
     }
 }
 
+/// Updates the string content of an existing 2D text node.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_node_set_text(
     scene: *mut OxideScene,
@@ -423,6 +473,7 @@ pub unsafe extern "C" fn oxide_scene_node_set_text(
     }
 }
 
+/// Rotates node around its local Y-axis by `rad` radians.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_node_rotate_y(
     scene: *mut OxideScene,
@@ -434,6 +485,7 @@ pub unsafe extern "C" fn oxide_scene_node_rotate_y(
     }
 }
 
+/// Rotates node around its local X-axis by `rad` radians.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_node_rotate_x(
     scene: *mut OxideScene,
@@ -445,6 +497,7 @@ pub unsafe extern "C" fn oxide_scene_node_rotate_x(
     }
 }
 
+/// Evaluates geometric intersection between colliders of `node_a` and `node_b`.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_check_collision(
     scene: *mut OxideScene,
@@ -463,6 +516,7 @@ pub unsafe extern "C" fn oxide_scene_check_collision(
     false
 }
 
+/// Kinematically separates two nodes along the contact normal to eliminate penetration.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_resolve_penetration(
     scene: *mut OxideScene,
@@ -478,6 +532,7 @@ pub unsafe extern "C" fn oxide_scene_resolve_penetration(
     }
 }
 
+/// Advances scene node behaviors and recalculates transform hierarchies.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_update(
     scene: *mut OxideScene,
@@ -489,6 +544,7 @@ pub unsafe extern "C" fn oxide_scene_update(
     }
 }
 
+/// Renders the scene graph (3D passes, 2D planar passes, and typography overlay).
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_render(
     scene: *mut OxideScene,

@@ -1,126 +1,130 @@
-# Модуль `core` — Ядро рантайма и жизненный цикл
+# Модуль `core` — Жизненный цикл приложения и контекст выполнения
 
-Модуль `core` управляет жизненным циклом приложения, циклом обработки событий операционной системы, контекстом графического устройства, таймингом и вводом.
+Модуль `core` управляет жизненным циклом приложения, циклом событий операционной системы, контекстом выполнения кадра, таймингом, устройствами ввода и обработкой ошибок.
 
-Исходный код: [`src/core/`](file:///e:/PRJCT/Oxide/src/core/)
+Исходный код: [`src/core/`](../../src/core/)
 
 ---
 
-## 1. Конфигурация и запуск приложения (`App`, `AppBuilder`)
+## 1. Разделение зон ответственности
 
-### Описание
-`App` предоставляет строитель `AppBuilder` для настройки параметров окна (заголовок, разрешение) и передачи структуры, реализующей трейт `AppHandler`.
+| Сущность | Модуль | Зона ответственности |
+| :--- | :--- | :--- |
+| **`App` / `AppBuilder`** | `core::app` | Конфигурация параметров приложения (заголовок, размер), создание цикла событий `winit::event_loop::EventLoop`, запуск обработчика `AppHandler`. Не управляет напрямую графическими вызовами. |
+| **`Context<'a>`** | `core::context` | Временный per-frame контекст, передаваемый в методы `AppHandler`. Предоставляет безопасный доступ к функциям OpenGL драйвера (`&glow::Context`), размерам области вывода, таймингу (`Time`) и вводу (`InputState`). Существует только в пределах обратного вызова кадра. |
+| **`WindowContext`** | `window::window_context` | Владелец системных ресурсов окна (`winit::window::Window`), поверхности вывода (`glutin::surface::Surface`) и аппаратного контекста OpenGL (`PossiblyCurrentContext`). Отвечает за вызовы смены буферов (`swap_buffers`) и ресайз поверхности. |
 
+---
+
+## 2. Жизненный цикл приложения (`App`, `AppBuilder`, `AppHandler`)
+
+### Структура `AppBuilder`
+Предоставляет методы настройки перед входом в цикл событий:
+- `AppBuilder::new() -> Self` — создание экземпляра со значениями по умолчанию (1280x720, "Oxide Runtime").
+- `with_title(title: impl Into<String>) -> Self` — установка заголовка окна ОС.
+- `with_size(width: u32, height: u32) -> Self` — установка логического размера окна в пикселях.
+- `run<H: AppHandler + 'static>(self, handler: H) -> Result<(), OxideError>` — инициализация подсистемы окон, компиляция графического контекста и запуск блокирующего цикла событий.
+
+### Трейт `AppHandler`
+Интерфейс обратных вызовов, реализуемый пользовательской структурой:
 ```rust
 use oxide::prelude::*;
 
-struct SimulationWorkspace;
+pub struct SimulationHandler;
 
-impl AppHandler for SimulationWorkspace {
+impl AppHandler for SimulationHandler {
     fn on_init(&mut self, ctx: &mut Context) {
-        // Выполняется один раз при старте
+        // Однократная инициализация после создания OpenGL контекста
+        ctx.set_viewport(0, 0, ctx.width as i32, ctx.height as i32);
     }
 
     fn on_update(&mut self, ctx: &mut Context, dt: f32) {
-        // Шаг симуляции (dt в секундах)
+        // Шаг вычислений логики симуляции
     }
 
     fn on_render(&mut self, ctx: &mut Context) {
-        // Отрисовка кадра
-        ctx.clear(Color::rgb(0.08, 0.09, 0.12));
+        // Формирование команд отрисовки
+        ctx.clear(Color::rgb(0.08, 0.10, 0.14));
     }
 }
-
-fn main() -> Result<(), OxideError> {
-    App::build()
-        .with_title("Oxide Workspace")
-        .with_size(1280, 720)
-        .run(SimulationWorkspace)
-}
 ```
-
-### Методы `AppBuilder`
-- `new() -> Self` — создание конфигуратора со значениями по умолчанию (1280x720, "Oxide Runtime").
-- `with_title(title: impl Into<String>) -> Self` — установка заголовка окна.
-- `with_size(width: u32, height: u32) -> Self` — установка логического размера окна в пикселях.
-- `run<H: AppHandler + 'static>(self, handler: H) -> Result<(), OxideError>` — инициализация окна, GL-контекста и запуск бесконечного цикла событий.
 
 ---
 
-## 2. Трейт жизненного цикла (`AppHandler`)
+## 3. Контекст кадра (`Context`)
 
-Интерфейс обратных вызовов для пользовательской логики:
+Структура `Context<'a>` агрегирует состояние текущего кадра:
 
 ```rust
-pub trait AppHandler {
-    fn on_init(&mut self, _ctx: &mut Context) {}
-    fn on_update(&mut self, _ctx: &mut Context, _dt: f32) {}
-    fn on_render(&mut self, _ctx: &mut Context) {}
+pub struct Context<'a> {
+    pub gl: &'a glow::Context,
+    pub width: u32,
+    pub height: u32,
+    pub time: &'a Time,
+    pub input: &'a InputState,
 }
 ```
 
-- **`on_init`**: Вызывается сразу после создания контекста OpenGL до входа в основной цикл. Здесь создаются камеры, меши и загружаются шрифты.
-- **`on_update`**: Вызывается перед отрисовкой каждого кадра. Передает актуальный `dt: f32` (delta time).
-- **`on_render`**: Вызывается для проходов рендеринга. Должен вызывать `ctx.clear(...)` и `scene.render(ctx)`.
+### Методы `Context`:
+- `aspect_ratio(&self) -> f32` — вычисляет соотношение сторон области вывода (`width as f32 / height as f32`).
+- `clear(&self, color: Color)` — очищает буфер цвета (`GL_COLOR_BUFFER_BIT`) и буфер глубины (`GL_DEPTH_BUFFER_BIT`).
+- `set_viewport(&self, x: i32, y: i32, width: i32, height: i32)` — задает активный OpenGL viewport.
+- `delta_time(&self) -> f32` — возвращает продолжительность предыдущего кадра в секундах ($\Delta t$).
+- `elapsed(&self) -> f32` — возвращает общее время выполнения приложения с момента запуска.
+- `fps(&self) -> f32` — возвращает усредненную частоту кадров за последний секундный интервал.
 
 ---
 
-## 3. Контекст выполнения (`Context`)
-
-`Context` передается по ссылке во все методы `AppHandler` и предоставляет безопасный доступ к графическому драйверу и периферии:
-
-| Метод | Возвращаемое значение | Назначение |
-| :--- | :--- | :--- |
-| `ctx.clear(color: Color)` | `()` | Очищает буфер цвета и буфер глубины заданным цветом |
-| `ctx.aspect_ratio()` | `f32` | Возвращает соотношение сторон экрана (`width / height`) |
-| `ctx.set_viewport(x, y, w, h)` | `()` | Задает границы OpenGL viewport |
-| `ctx.delta_time()` | `f32` | Текущий шаг времени между кадрами в секундах |
-| `ctx.elapsed()` | `f32` | Суммарное время работы приложения с момента запуска |
-| `ctx.fps()` | `f32` | Сглаженное значение кадров в секунду |
-
----
-
-## 4. Управление временем (`Time`)
+## 4. Расчет времени (`Time`)
 
 Структура `Time` использует высокоточный системный таймер `std::time::Instant`:
-- Защита от спирали задержек (delta time ограничивается сверху значением `0.1с` при подвисании окна).
-- Внутренний секундный аккумулятор для точного вычисления FPS.
-- Счетчик суммарного количества кадров `frame_count()`.
+- **Защита от спирали задержек:** Шаг $\Delta t$ ограничен сверху значением `0.1` с (`duration.as_secs_f32().min(0.1)`), что предотвращает скачки физики при перемещении или потере фокуса окна.
+- **Подсчет FPS:** Скользящее усреднение по суммарному числу кадров за интервал $\ge 1.0$ секунды.
+- **Счетчик кадров:** `frame_count() -> u64` отслеживает общее число отрисованных кадров.
 
 ---
 
-## 5. Обработка ввода (`InputState`)
+## 5. Опрос устройств ввода (`InputState`)
 
-Доступ через `ctx.input`. Позволяет опрашивать состояние клавиатуры и мыши:
+Регистрирует состояния клавиатуры и мыши через `winit`:
 
-```rust
-// Проверка клавиатуры
-if ctx.input.is_key_down(KeyCode::Space) {
-    // Клавиша зажата
-}
-if ctx.input.is_key_just_pressed(KeyCode::KeyR) {
-    // Клавиша была нажата именно в текущем кадре
-}
+### Клавиатура:
+- `is_key_down(key: KeyCode) -> bool` — клавиша удерживается в нажатом состоянии.
+- `is_key_just_pressed(key: KeyCode) -> bool` — клавиша была нажата в текущем кадре.
+- `is_key_just_released(key: KeyCode) -> bool` — клавиша была отпущена в текущем кадре.
 
-// Мышь
-let mouse_pos = ctx.input.mouse_position(); // glam::Vec2 в пикселях
-let mouse_delta = ctx.input.mouse_delta();   // смещение за кадр
-if ctx.input.is_mouse_button_down(MouseButton::Left) {
-    // Зажата левая кнопка
-}
-```
+### Мышь:
+- `is_mouse_button_down(button: MouseButton) -> bool` — кнопка мыши удерживается.
+- `is_mouse_button_just_pressed(button: MouseButton) -> bool` — кнопка нажата в текущем кадре.
+- `is_mouse_button_just_released(button: MouseButton) -> bool` — кнопка отпущена в текущем кадре.
+- `mouse_position() -> Vec2` — текущие экранные координаты курсора в пикселях.
+- `mouse_delta() -> Vec2` — смещение курсора относительно предыдущего кадра.
+- `mouse_wheel_delta() -> Vec2` — вектор смещения колеса мыши за текущий кадр.
 
 ---
 
-## 6. Цвет (`Color`)
+## 6. Представление цвета (`Color`)
 
-Структура `Color` оперирует компонентами в диапазоне `[0.0, 1.0]`:
-
+Структура `Color` содержит 4 компонента `f32` в диапазоне `[0.0, 1.0]`:
 ```rust
-let col = Color::rgba(0.2, 0.6, 1.0, 0.85);
-let white = Color::WHITE;
-let transparent = Color::TRANSPARENT;
-
-let array: [f32; 4] = col.to_array();
-let vec4: glam::Vec4 = col.to_vec4();
+pub struct Color {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
 ```
+Константы: `Color::WHITE`, `Color::BLACK`, `Color::RED`, `Color::GREEN`, `Color::BLUE`, `Color::TRANSPARENT`.  
+Методы преобразования: `to_array() -> [f32; 4]` и `to_vec4() -> glam::Vec4`.
+
+---
+
+## 7. Обработка ошибок (`OxideError`)
+
+Все ошибки подсистем строго типизированы перечислением `OxideError` на базе `thiserror`:
+- `WindowCreation(String)` — ошибка создания системного окна или цикла событий.
+- `ContextError(String)` — ошибка компиляции, выбора конфигурации пикселей или переключения контекста OpenGL.
+- `ShaderError(String)` — ошибка компиляции вершинного/фрагментного шейдера или линковки шейдерной программы.
+- `TextureError(String)` — ошибка декодирования изображения или выделения текстуры в видеопамяти.
+- `MeshError(String)` — ошибка парсинга геометрии (например, в парсере `tobj`).
+- `Io(std::io::Error)` — ошибки ввода-вывода при чтении файлов с накопителя.

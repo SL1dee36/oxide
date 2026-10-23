@@ -3,14 +3,28 @@ use crate::collision::ray::{Ray3D, RaycastHit};
 use crate::spatial::transform::Transform;
 use glam::{Mat4, Vec2, Vec3};
 
+/// Supported collision bounding volume primitives.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Collider {
-    Box3D { half_extents: Vec3 },
-    Sphere { radius: f32 },
-    Box2D { half_extents: Vec2 },
+    /// 3D Axis-Aligned Bounding Box specified by half-extents along X, Y, and Z axes.
+    Box3D {
+        /// Half-extents vector $(h_x, h_y, h_z)$.
+        half_extents: Vec3,
+    },
+    /// 3D spherical bounding volume defined by radius.
+    Sphere {
+        /// Sphere radius in world units.
+        radius: f32,
+    },
+    /// 2D rectangular bounding box in screen pixels.
+    Box2D {
+        /// Half-extents vector $(h_x, h_y)$.
+        half_extents: Vec2,
+    },
 }
 
 impl Collider {
+    /// Constructs a 3D box collider from total dimensions `(dx, dy, dz)`.
     #[inline]
     pub fn box_3d(size: Vec3) -> Self {
         Self::Box3D {
@@ -18,11 +32,13 @@ impl Collider {
         }
     }
 
+    /// Constructs a 3D spherical bounding volume with given `radius`.
     #[inline]
     pub fn sphere(radius: f32) -> Self {
         Self::Sphere { radius }
     }
 
+    /// Constructs a 2D box collider from total pixel dimensions `(width, height)`.
     #[inline]
     pub fn box_2d(size: Vec2) -> Self {
         Self::Box2D {
@@ -31,17 +47,22 @@ impl Collider {
     }
 }
 
+/// 3D Axis-Aligned Bounding Box (AABB) defined by minimum and maximum extents.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Aabb3D {
+    /// Minimum corner coordinate $(x_{\min}, y_{\min}, z_{\min})$.
     pub min: Vec3,
+    /// Maximum corner coordinate $(x_{\max}, y_{\max}, z_{\max})$.
     pub max: Vec3,
 }
 
 impl Aabb3D {
+    /// Constructs an AABB from explicit min and max points.
     pub fn new(min: Vec3, max: Vec3) -> Self {
         Self { min, max }
     }
 
+    /// Constructs an AABB from center point and half-extents vector.
     pub fn from_center_half_extents(center: Vec3, half_extents: Vec3) -> Self {
         Self {
             min: center - half_extents,
@@ -49,14 +70,17 @@ impl Aabb3D {
         }
     }
 
+    /// Computes the geometric center point of the box.
     pub fn center(&self) -> Vec3 {
         (self.min + self.max) * 0.5
     }
 
+    /// Returns the half-extents vector $(h_x, h_y, h_z)$.
     pub fn half_extents(&self) -> Vec3 {
         (self.max - self.min) * 0.5
     }
 
+    /// Transforms the AABB by a 4x4 affine matrix, computing a conservative enclosing AABB.
     pub fn transform(&self, matrix: &Mat4) -> Self {
         let center = self.center();
         let half = self.half_extents();
@@ -73,6 +97,7 @@ impl Aabb3D {
         Self::from_center_half_extents(new_center, new_half)
     }
 
+    /// Returns `true` if this AABB overlaps with `other`.
     pub fn intersects(&self, other: &Self) -> bool {
         self.min.x <= other.max.x
             && self.max.x >= other.min.x
@@ -82,6 +107,7 @@ impl Aabb3D {
             && self.max.z >= other.min.z
     }
 
+    /// Computes the contact manifold along the axis of minimum penetration against `other` AABB.
     pub fn contact(&self, other: &Self) -> Option<ContactManifold> {
         let d1 = other.max - self.min;
         let d2 = self.max - other.min;
@@ -128,6 +154,7 @@ impl Aabb3D {
         }
     }
 
+    /// Performs slab-method ray intersection against this AABB.
     pub fn raycast(&self, ray: &Ray3D) -> Option<RaycastHit> {
         let mut tmin = (self.min.x - ray.origin.x) / ray.direction.x;
         let mut tmax = (self.max.x - ray.origin.x) / ray.direction.x;
@@ -189,6 +216,7 @@ impl Aabb3D {
         })
     }
 
+    /// Evaluates contact between this AABB and a bounding sphere.
     pub fn contact_sphere(&self, sphere: &BoundingSphere) -> Option<ContactManifold> {
         let closest = Vec3::new(
             sphere.center.x.clamp(self.min.x, self.max.x),
@@ -240,23 +268,29 @@ impl Aabb3D {
     }
 }
 
+/// 3D spherical bounding volume defined by center point and radius.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoundingSphere {
+    /// Center of the sphere in world Cartesian coordinates.
     pub center: Vec3,
+    /// Sphere radius in world units.
     pub radius: f32,
 }
 
 impl BoundingSphere {
+    /// Constructs a bounding sphere from center position and radius.
     pub fn new(center: Vec3, radius: f32) -> Self {
         Self { center, radius }
     }
 
+    /// Evaluates whether this sphere intersects with `other`.
     pub fn intersects(&self, other: &Self) -> bool {
         let dist_sq = self.center.distance_squared(other.center);
         let rad_sum = self.radius + other.radius;
         dist_sq <= rad_sum * rad_sum
     }
 
+    /// Computes contact manifold between two spheres.
     pub fn contact(&self, other: &Self) -> Option<ContactManifold> {
         let diff = other.center - self.center;
         let dist = diff.length();
@@ -278,6 +312,7 @@ impl BoundingSphere {
         Some(ContactManifold::new(normal, depth, point))
     }
 
+    /// Performs quadratic ray-sphere intersection test.
     pub fn raycast(&self, ray: &Ray3D) -> Option<RaycastHit> {
         let oc = ray.origin - self.center;
         let a = ray.direction.dot(ray.direction);
@@ -305,17 +340,22 @@ impl BoundingSphere {
     }
 }
 
+/// 2D Axis-Aligned Bounding Box for planar screen-space elements.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Aabb2D {
+    /// Minimum corner in screen coordinates (pixels).
     pub min: Vec2,
+    /// Maximum corner in screen coordinates (pixels).
     pub max: Vec2,
 }
 
 impl Aabb2D {
+    /// Constructs a 2D AABB from explicit min and max points.
     pub fn new(min: Vec2, max: Vec2) -> Self {
         Self { min, max }
     }
 
+    /// Constructs a 2D AABB from center point and half-extents.
     pub fn from_center_half_extents(center: Vec2, half_extents: Vec2) -> Self {
         Self {
             min: center - half_extents,
@@ -323,6 +363,7 @@ impl Aabb2D {
         }
     }
 
+    /// Evaluates overlap between two 2D AABBs.
     pub fn intersects(&self, other: &Self) -> bool {
         self.min.x <= other.max.x
             && self.max.x >= other.min.x
@@ -330,6 +371,7 @@ impl Aabb2D {
             && self.max.y >= other.min.y
     }
 
+    /// Computes 2D contact manifold along minimum separation axis.
     pub fn contact(&self, other: &Self) -> Option<ContactManifold> {
         let d1 = other.max - self.min;
         let d2 = self.max - other.min;
@@ -363,6 +405,7 @@ impl Aabb2D {
     }
 }
 
+/// Displaces transforms of two dynamic bodies equally (50% / 50%) along contact normal to resolve geometric overlap.
 pub fn resolve_penetration(
     transform_a: &mut Transform,
     transform_b: &mut Transform,
@@ -371,6 +414,7 @@ pub fn resolve_penetration(
     resolve_penetration_weighted(transform_a, false, transform_b, false, contact);
 }
 
+/// Displaces transforms along contact normal respecting static immovable flags (`is_static_a`, `is_static_b`).
 pub fn resolve_penetration_weighted(
     transform_a: &mut Transform,
     is_static_a: bool,

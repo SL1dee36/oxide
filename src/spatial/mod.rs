@@ -1,3 +1,5 @@
+//! Spatial scene hierarchy, node graph, camera representations, and TRS transformations.
+
 pub mod camera;
 pub mod node;
 pub mod scene;

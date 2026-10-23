@@ -1,6 +1,7 @@
 use crate::core::error::OxideError;
 use glow::HasContext;
 
+/// 2D texture allocation resident in GPU memory (`GL_TEXTURE_2D`).
 pub struct Texture2D {
     id: glow::Texture,
     width: u32,
@@ -8,6 +9,7 @@ pub struct Texture2D {
 }
 
 impl Texture2D {
+    /// Creates a 2D RGBA texture, uploads pixel data, sets repeat/linear filtering, and generates mipmaps.
     pub fn new(
         gl: &glow::Context,
         width: u32,
@@ -61,14 +63,17 @@ impl Texture2D {
         }
     }
 
+    /// Allocates a 1x1 pixel texture with a uniform RGBA color.
     pub fn single_color(gl: &glow::Context, color: [u8; 4]) -> Result<Self, OxideError> {
         Self::new(gl, 1, 1, &color)
     }
 
+    /// Allocates a 1x1 solid opaque white texture (255, 255, 255, 255).
     pub fn white(gl: &glow::Context) -> Result<Self, OxideError> {
         Self::single_color(gl, [255, 255, 255, 255])
     }
 
+    /// Binds texture to the specified texture unit slot (`GL_TEXTURE0 + slot`).
     #[inline]
     pub fn bind(&self, gl: &glow::Context, slot: u32) {
         unsafe {
@@ -77,6 +82,7 @@ impl Texture2D {
         }
     }
 
+    /// Unbinds texture from the specified texture unit slot.
     #[inline]
     pub fn unbind(&self, gl: &glow::Context, slot: u32) {
         unsafe {
@@ -85,16 +91,19 @@ impl Texture2D {
         }
     }
 
+    /// Width of the texture image in pixels.
     #[inline]
     pub fn width(&self) -> u32 {
         self.width
     }
 
+    /// Height of the texture image in pixels.
     #[inline]
     pub fn height(&self) -> u32 {
         self.height
     }
 
+    /// Deallocates the texture object from GPU memory.
     pub fn destroy(&self, gl: &glow::Context) {
         unsafe {
             gl.delete_texture(self.id);

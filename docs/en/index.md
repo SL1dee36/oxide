@@ -1,70 +1,77 @@
-# Oxide Engine — Architectural Guide
+# Oxide Architecture Guide
 
-> **Authors:** Nazaryan Artem (`nazaryannnn36@gmail.com`) & Google Gemini 3.8  
-> **Core Stack:** Rust + OpenGL 3.3 Core Profile
-
----
-
-## Overview
-
-**Oxide** is a modular, high-performance multimedia and simulation runtime engine. Its architecture is engineered as the foundation for future interactive design environments (conceptually aligned with Godot's node and scene hierarchy, but strictly replacing game-specific jargon with systems engineering terminology).
-
-The framework simultaneously supports native Rust development via the unified `oxide::prelude::*` facade, and any language with C-ABI compatibility (C, C++, Python, C#, Zig) via `oxide.dll` / `liboxide.so` and `include/oxide.h`.
+Oxide is a modular 2D/3D rendering, spatial hierarchy, and collision detection engine written in Rust with an OpenGL 3.3 Core Profile graphics backend. It provides decoupled subsystems for real-time graphics, transform hierarchies, geometric collision queries, and multi-language embedding via a C99 ABI.
 
 ---
 
-## Architectural Stack
+## Frame Execution Pipeline
+
+Each frame in Oxide follows a deterministic execution pipeline:
 
 ```mermaid
-graph TD
-    UserCode[Application Code: Rust / Python / C / C++] --> Facade[Public API / Facade / C-ABI]
-    
-    subgraph Engine Core [Oxide Core]
-        Facade --> Core[Module core: App, Context, Time, Input]
-        Facade --> Spatial[Module spatial: Scene Graph, Nodes, Camera, Transform]
-        Facade --> Collision[Module collision: AABB, Sphere, Raycast, Manifold]
-        Facade --> Text[Module text: Font, FontAtlas, PipelineText]
-        Facade --> Assets[Module assets: Mesh3D, Surface2D, OBJ & Image Loader]
-        
-        Spatial --> Renderer[Module renderer: Pipeline3D, Pipeline2D, Shaders, Buffers]
-        Text --> Renderer
-        Core --> Window[Module window: WindowContext winit + glutin + glow]
-        Renderer --> Window
+sequenceDiagram
+    autonumber
+    participant OS as OS Window Manager
+    participant Window as window::WindowContext
+    participant Core as core::App / Event Loop
+    participant InputTime as InputState & Time
+    participant Scene as spatial::Scene
+    participant Collision as collision::Collider
+    participant Renderer as renderer::Pipeline
+    participant GPU as Graphics Processing Unit (GPU)
+
+    OS->>Window: Input / Redraw Events (RedrawRequested)
+    Window->>Core: WindowEvent
+    Core->>InputTime: Update Time (compute dt) and InputState
+    Core->>Scene: scene.update(ctx, dt)
+    Scene->>Scene: update_transforms() (recalculate world matrices)
+    Scene->>Collision: check_intersection() / resolve_penetration()
+    Core->>Renderer: scene.render(ctx)
+    rect rgb(20, 24, 34)
+        Renderer->>GPU: Phase 1: 3D Pass (Pipeline3D, depth test, lighting)
     end
-    
-    Window --> OS[Operating System & GPU Driver: OpenGL 3.3 Core]
+    rect rgb(24, 30, 42)
+        Renderer->>GPU: Phase 2: 2D Pass (Pipeline2D, screen quads, blending)
+    end
+    rect rgb(28, 36, 50)
+        Renderer->>GPU: Phase 3: Text Pass (PipelineText, glyph atlas)
+    end
+    Renderer->>Window: swap_buffers() (framebuffer swap)
+    Window->>OS: Present rendered frame to display
 ```
 
+### Frame Execution Stages:
+1. **Window Event Polling:** The `window` subsystem receives resize, focus, and user input events from the operating system via `winit`.
+2. **Timing and Input Updates:** `Time` calculates frame delta time $\Delta t$ (clamped to 0.1s to avoid latency spirals), while `InputState` tracks discrete state transitions for keyboard keys and mouse buttons.
+3. **Scene Graph Traversal:** `Scene::update` traverses the hierarchy, recursively evaluating global transformation matrices ($M_{\text{global}} = M_{\text{parent}} \times M_{\text{local}}$), and invokes attached `NodeBehavior` logic.
+4. **Geometric Collision Detection:** Intersections between node bounding volumes (`Collider`) are evaluated, generating contact manifolds (`ContactManifold`), followed by kinematic penetration resolution.
+5. **Multi-Pass Rendering:**
+   - **Phase 1 (3D Pass):** Binds `Pipeline3D`, enables depth testing (`GL_DEPTH_TEST`), uploads view and projection matrices, calculates directional lighting, and renders polygon geometry `Mesh3D`.
+   - **Phase 2 (2D Pass):** Binds `Pipeline2D`, disables depth testing, enables alpha blending, applies screen-space orthographic projection, and renders planar quads `Surface2D`.
+   - **Phase 3 (Text Pass):** Binds `PipelineText`, binds the texture atlas `FontAtlas`, and draws character batches `Text2D` in a single `glDrawElements` call.
+6. **Buffer Swap:** `WindowContext::swap_buffers` swaps the front and back framebuffers with vertical synchronization enabled.
+
 ---
 
-## Documentation Structure
+## Documentation Index
 
-Module documentation is organized as follows:
-
-| Module | Description | Document |
+| Module | File | Subsystem Description |
 | :--- | :--- | :--- |
-| **`core`** | Application lifecycle, frame timing, input state, execution context, errors | [`docs/en/core.md`](file:///e:/PRJCT/Oxide/docs/en/core.md) |
-| **`window`** | `winit 0.29` event loop, `glutin 0.31` OpenGL context creation, `glow` binding | [`docs/en/window.md`](file:///e:/PRJCT/Oxide/docs/en/window.md) |
-| **`spatial`** | Hierarchical scene graph, TRS transforms, parent-child propagation, cameras | [`docs/en/spatial.md`](file:///e:/PRJCT/Oxide/docs/en/spatial.md) |
-| **`renderer`** | 3D lit pipeline, 2D quad pipeline, GLSL shaders, GPU buffers, textures | [`docs/en/renderer.md`](file:///e:/PRJCT/Oxide/docs/en/renderer.md) |
-| **`collision`** | Analytical collisions (Box 2D/3D, Sphere), Raycasting, penetration resolution | [`docs/en/collision.md`](file:///e:/PRJCT/Oxide/docs/en/collision.md) |
-| **`text`** | TTF/OTF rasterization via `fontdue`, 1024x1024 atlas, Cyrillic typography | [`docs/en/text.md`](file:///e:/PRJCT/Oxide/docs/en/text.md) |
-| **`assets`** | Procedural primitives (cube, sphere, plane), Wavefront OBJ and image loaders | [`docs/en/assets.md`](file:///e:/PRJCT/Oxide/docs/en/assets.md) |
-| **`ffi`** | External C-ABI interface, `oxide.h` header, zero-dependency Python wrapper | [`docs/en/ffi.md`](file:///e:/PRJCT/Oxide/docs/en/ffi.md) |
+| **`core`** | [`core.md`](core.md) | Application lifecycle (`App`), execution context (`Context`), timing (`Time`), input polling (`InputState`), typed errors (`OxideError`). |
+| **`window`** | [`window.md`](window.md) | OS window initialization, OpenGL 3.3 Core context binding (`WindowContext`), viewport configuration. |
+| **`renderer`** | [`renderer.md`](renderer.md) | Graphics pipelines (`Pipeline3D`, `Pipeline2D`), GLSL shader programs (`ShaderProgram`), GPU buffers (`VertexArray`, `VertexBuffer`, `IndexBuffer`), textures (`Texture2D`). |
+| **`spatial`** | [`spatial.md`](spatial.md) | Hierarchical scene graph (`Scene`, `SpatialNode`), spatial transforms (`Transform`), perspective and orthographic camera models (`Camera`). |
+| **`collision`** | [`collision.md`](collision.md) | Geometric collision detection (`Collider`: Box3D, Sphere, Box2D), contact manifolds (`ContactManifold`), raycasting (`Ray3D`, `RaycastHit`). |
+| **`assets`** | [`assets.md`](assets.md) | RAM polygonal geometry (`Mesh3D`), 2D surfaces (`Surface2D`), procedural primitive generators, Wavefront OBJ and image loaders. |
+| **`text`** | [`text.md`](text.md) | TrueType/OpenType font parsing (`Font`), 1024x1024 glyph atlas generation (`FontAtlas`), text elements (`Text2D`), text rendering pipeline (`PipelineText`). |
+| **`math`** | [`math.md`](math.md) | Coordinate systems, angular units, vector, matrix, and quaternion re-exports from `glam`. |
+| **`ffi`** | [`ffi.md`](ffi.md) | C ABI symbol export (`include/oxide.h`), manual Rust heap lifetime management, Python `ctypes` bindings (`bindings/python/oxide.py`). |
 
 ---
 
-## Core Engineering Principles
+## Design Principles
 
-1. **Zero Game-Specific Jargon:**
-   - `Game` -> `App`, `Runtime`.
-   - `Actor` / `GameObject` -> `SpatialNode`, `Element`.
-   - `Level` -> `Scene`, `Workspace`.
-   - `Sprite` -> `Surface2D`, `PlanarMesh`, `TextureQuad`.
-2. **Single-Import Facade:**
-   - A single `use oxide::prelude::*;` imports everything needed to build, simulate, and render.
-3. **Two-Tiered Coordinate Model:**
-   - **3D World:** Right-handed system (Y-up, -Z forward), perspective camera, directional and ambient lighting.
-   - **2D Overlay:** Screen pixel space (top-left origin `(0, 0)`, X-right, Y-down), orthographic camera, alpha blending.
-4. **Cross-Platform and Multi-Language:**
-   - Single Rust codebase builds both as an `rlib` and a `cdylib` without ABI fragmentation.
+1. **Decoupled Subsystem Architecture:** Core modules (`renderer`, `spatial`, `collision`, `text`, `assets`) can be used independently or integrated into a unified application runtime.
+2. **Explicit RAM / VRAM Separation:** Host-side asset structures (`Mesh3D`, `Surface2D`, `Font`) are cleanly segregated from GPU VRAM resources (`VertexArray`, `VertexBuffer`, `Texture2D`), preventing hidden allocations.
+3. **Single-Import Prelude Facade:** All common engine types, math structures, and loader functions are accessible via `use oxide::prelude::*;`.
+4. **Cross-Platform C ABI:** The core library compiles simultaneously as a static Rust crate (`rlib`) and a shared dynamic library (`cdylib`), exposing a standard C99 interface.

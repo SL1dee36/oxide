@@ -16,9 +16,12 @@ use crate::text::text2d::Text2D;
 use glam::{Mat4, Vec2, Vec3};
 use std::sync::Arc;
 
+/// Hierarchical scene graph container coordinating spatial nodes, cameras, lights, and rendering passes.
 pub struct Scene {
     nodes: Vec<Option<SpatialNode>>,
+    /// Active viewing camera.
     pub camera: Camera,
+    /// Active 3D directional light source.
     pub light: Light3D,
     pipeline_3d: Option<Pipeline3D>,
     pipeline_2d: Option<Pipeline2D>,
@@ -27,6 +30,7 @@ pub struct Scene {
 }
 
 impl Scene {
+    /// Creates an empty scene graph with default camera and directional light.
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
@@ -39,30 +43,37 @@ impl Scene {
         }
     }
 
+    /// Replaces the active viewing camera.
     pub fn set_camera(&mut self, camera: Camera) {
         self.camera = camera;
     }
 
+    /// Returns an immutable reference to the active camera.
     pub fn camera(&self) -> &Camera {
         &self.camera
     }
 
+    /// Returns a mutable reference to the active camera.
     pub fn camera_mut(&mut self) -> &mut Camera {
         &mut self.camera
     }
 
+    /// Replaces the directional lighting configuration.
     pub fn set_light(&mut self, light: Light3D) {
         self.light = light;
     }
 
+    /// Returns an immutable reference to directional lighting.
     pub fn light(&self) -> &Light3D {
         &self.light
     }
 
+    /// Returns a mutable reference to directional lighting.
     pub fn light_mut(&mut self) -> &mut Light3D {
         &mut self.light
     }
 
+    /// Instantiates a generic node into the scene hierarchy and returns its unique [`NodeId`].
     pub fn spawn_node(
         &mut self,
         name: impl Into<String>,
@@ -80,6 +91,7 @@ impl Scene {
         id
     }
 
+    /// Spawns a 3D polygon mesh node with an attached collider.
     pub fn spawn_mesh_3d(
         &mut self,
         mesh: Mesh3D,
@@ -89,6 +101,7 @@ impl Scene {
         self.spawn_node("Mesh3D", NodeKind::Mesh3D(mesh), transform, Some(collider))
     }
 
+    /// Spawns an immobile 3D mesh node with `is_static = true`.
     pub fn spawn_static_mesh_3d(
         &mut self,
         mesh: Mesh3D,
@@ -100,6 +113,7 @@ impl Scene {
         id
     }
 
+    /// Spawns a 2D planar quad surface in screen coordinates.
     pub fn spawn_surface_2d(
         &mut self,
         surface: Surface2D,
@@ -109,14 +123,17 @@ impl Scene {
         self.spawn_node("Surface2D", NodeKind::Surface2D(surface), transform, Some(collider))
     }
 
+    /// Assigns a shared font atlas for typography rendering in this scene.
     pub fn set_font_atlas(&mut self, atlas: Arc<FontAtlas>) {
         self.font_atlas = Some(atlas);
     }
 
+    /// Returns the active shared font atlas if assigned.
     pub fn font_atlas(&self) -> Option<Arc<FontAtlas>> {
         self.font_atlas.clone()
     }
 
+    /// Spawns a 2D screen-space typography text element.
     pub fn spawn_text_2d(
         &mut self,
         text: Text2D,
@@ -125,6 +142,7 @@ impl Scene {
         self.spawn_node("Text2D", NodeKind::Text2D(text), transform, None)
     }
 
+    /// Attaches `child_id` under `parent_id` in the transform tree.
     pub fn attach_child(&mut self, parent_id: NodeId, child_id: NodeId) {
         if parent_id.0 >= self.nodes.len() || child_id.0 >= self.nodes.len() {
             return;
@@ -141,6 +159,7 @@ impl Scene {
         }
     }
 
+    /// Retrieves an immutable reference to the node with identifier `id`.
     pub fn node(&self, id: NodeId) -> &SpatialNode {
         self.nodes
             .get(id.0)
@@ -148,6 +167,7 @@ impl Scene {
             .expect("Invalid NodeId accessed in Scene")
     }
 
+    /// Retrieves a mutable reference to the node with identifier `id`.
     pub fn node_mut(&mut self, id: NodeId) -> &mut SpatialNode {
         self.nodes
             .get_mut(id.0)
@@ -155,6 +175,7 @@ impl Scene {
             .expect("Invalid NodeId accessed in Scene")
     }
 
+    /// Traverses the scene hierarchy and recalculates world transformation matrices for all nodes.
     pub fn update_transforms(&mut self) {
         let root_ids: Vec<NodeId> = self
             .nodes
@@ -183,6 +204,7 @@ impl Scene {
         }
     }
 
+    /// Updates hierarchical transforms and runs attached node behaviors with delta time `dt`.
     pub fn update(&mut self, ctx: &mut Context, dt: f32) {
         self.update_transforms();
 
@@ -198,6 +220,7 @@ impl Scene {
         }
     }
 
+    /// Executes the multi-pass frame rendering pipeline (3D meshes, 2D surfaces, and 2D text overlay).
     pub fn render(&mut self, ctx: &mut Context) {
         self.update_transforms();
 
@@ -295,6 +318,7 @@ impl Scene {
         }
     }
 
+    /// Evaluates geometric intersection between colliders of two nodes.
     pub fn check_intersection(&self, a_id: NodeId, b_id: NodeId) -> Option<ContactManifold> {
         let node_a = self.node(a_id);
         let node_b = self.node(b_id);
@@ -362,6 +386,7 @@ impl Scene {
         }
     }
 
+    /// Kinematically separates two overlapping nodes along the contact normal taking `is_static` into account.
     pub fn resolve_penetration(&mut self, a_id: NodeId, b_id: NodeId, contact: &ContactManifold) {
         if a_id == b_id {
             return;
@@ -391,6 +416,7 @@ impl Scene {
         node_b.global_transform = node_b.transform.matrix();
     }
 
+    /// Casts a ray through the scene, returning the closest intersecting node and hit information.
     pub fn raycast(&self, ray: &Ray3D) -> Option<(NodeId, RaycastHit)> {
         let mut closest_hit: Option<(NodeId, RaycastHit)> = None;
 

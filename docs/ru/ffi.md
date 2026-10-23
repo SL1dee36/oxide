@@ -1,69 +1,106 @@
-# Модуль `ffi` — Внешний интерфейс C-ABI и мультиязычные биндинги
+# Модуль `ffi` — Внешний интерфейс C ABI и модель управления памятью
 
-Модуль `ffi` предоставляет стабильный C-совместимый интерфейс (`extern "C"`), позволяющий использовать Oxide из **Python**, **C**, **C++**, **C#**, **Zig** и любых других языков.
+Модуль `ffi` экспортирует стабильный ANSI C99-совместимый интерфейс (`extern "C"`), позволяющий вызывать функции Oxide из C, C++, Python, C#, Zig и любых языков с поддержкой C ABI.
 
-Исходный код: [`src/ffi/`](file:///e:/PRJCT/Oxide/src/ffi/)  
-Заголовочный файл C/C++: [`include/oxide.h`](file:///e:/PRJCT/Oxide/include/oxide.h)  
-Python-обертка: [`bindings/python/oxide.py`](file:///e:/PRJCT/Oxide/bindings/python/oxide.py)
+Исходный код: [`src/ffi/`](../../src/ffi/)  
+Заголовочный файл C/C++: [`include/oxide.h`](../../include/oxide.h)  
+Python-обертка: [`bindings/python/oxide.py`](../../bindings/python/oxide.py)
 
 ---
 
-## 1. Сборка динамической библиотеки
+## 1. Модель владения и времени жизни памяти (Ownership & Lifetimes)
 
-Чтобы собрать библиотеку `oxide.dll` (Windows) или `liboxide.so` (Linux), выполните:
+Взаимодействие через границу FFI подчинено строгим правилам управления памятью между кучей Rust и клиентским кодом:
 
-```bash
-cargo build --lib --release
+```mermaid
+flowchart TD
+    subgraph RustHeap [Куча Rust (Heap Allocation)]
+        AppAlloc["oxide_app_create()<br/>Box::into_raw(Box::new(OxideApp))"]
+        SceneAlloc["oxide_scene_create()<br/>Box::into_raw(Box::new(OxideScene))"]
+    end
+
+    subgraph ClientCode [Клиентский код (C / Python)]
+        AppPtr["*mut OxideApp (Непрозрачный указатель)"]
+        ScenePtr["*mut OxideScene (Непрозрачный указатель)"]
+        CtxPtr["*mut OxideContext (Временная ссылка)"]
+    end
+
+    AppAlloc --> AppPtr
+    SceneAlloc --> ScenePtr
+
+    AppPtr -->|"oxide_app_run(app, callbacks)"| AppConsumed["Box::from_raw(app) -> Освобождается при выходе из цикла"]
+    AppPtr -->|"oxide_app_destroy(app)<br/>(только если не вызывался run)"| AppFreed["drop(Box::from_raw(app))"]
+    ScenePtr -->|"oxide_scene_destroy(scene)<br/>(Обязательный вызов)"| SceneFreed["drop(Box::from_raw(scene))"]
+
+    AppConsumed -.-> CtxPtr
+    NoteCtx["OxideContext валиден ТОЛЬКО внутри callback-функции!"] -.-> CtxPtr
 ```
 
-Файл библиотеки появится в каталоге `target/release/`.
+### 1.1. Создание и освобождение приложения (`OxideApp`):
+- `oxide_app_create(title, width, height) -> *mut OxideApp` выделяет память под структуру `OxideApp` в куче Rust через `Box::into_raw` и возвращает непрозрачный указатель.
+- **Потребление при запуске:** Функция `oxide_app_run(app, callbacks)` принимает владение указателем `app`, восстанавливает `Box::from_raw(app)` и **автоматически освобождает память** при выходе из цикла событий.
+- **Ручное освобождение:** Функция `oxide_app_destroy(app)` вызывается **только в том случае, если `oxide_app_run` не вызывалась** (например, при отмене запуска). Повторный вызов `oxide_app_destroy` после `oxide_app_run` недопустим и приводит к двойному освобождению (double-free).
+
+### 1.2. Создание и освобождение сцены (`OxideScene`):
+- `oxide_scene_create() -> *mut OxideScene` аллоцирует граф сцены в куче Rust.
+- Клиентский код **обязан явно освободить память сцены** вызовом `oxide_scene_destroy(scene)` после завершения работы.
+
+### 1.3. Контекст выполнения кадра (`OxideContext`):
+- Передается по указателю в функции обратного вызова `on_init`, `on_update`, `on_render`.
+- Является временной ссылкой на стек Rust-рантайма. **Запрещено сохранять указатель `OxideContext`** для использования вне тела обратного вызова.
 
 ---
 
-## 2. Разработка на Python
+## 2. Разработка на Python (`bindings/python/oxide.py`)
 
-Пакет `bindings/python/oxide.py` работает на стандартной библиотеке `ctypes` без необходимости установки сторонних пакетов через `pip`:
+Обертка на базе стандартной библиотеки `ctypes` не требует сторонних зависимостей (`pip`) и реализует автоматическое освобождение памяти через деструкторы и контекстные менеджеры:
 
 ```python
-import sys
-sys.path.append("bindings/python")
-from oxide import App, Scene, Vec3, Vec2, Color, Transform
+from oxide import App, Scene, Vec3, Color, Transform
 
 class Simulation:
     def __init__(self):
+        # Автоматическое управление: Scene.__del__ вызовет oxide_scene_destroy
         self.scene = Scene()
         self.cube = None
 
     def on_init(self, ctx):
         self.scene.set_camera_perspective(
-            fov_deg=60.0, aspect=ctx.aspect_ratio, near=0.1, far=100.0,
-            eye=Vec3(0, 3, 8), target=Vec3(0, 0, 0)
+            fov_deg=60.0,
+            aspect=ctx.aspect_ratio,
+            near=0.1,
+            far=100.0,
+            eye=Vec3(0.0, 3.0, 8.0),
+            target=Vec3(0.0, 0.0, 0.0),
         )
-        self.cube = self.scene.spawn_cube_3d(1.5, Transform.from_xyz(-1.2, 0, 0))
+        self.cube = self.scene.spawn_cube_3d(1.5, Transform.from_xyz(0.0, 0.0, 0.0))
 
     def on_update(self, ctx, dt):
         self.scene.node_rotate_y(self.cube, 1.2 * dt)
         self.scene.update(ctx, dt)
 
     def on_render(self, ctx):
-        ctx.clear(Color(0.08, 0.09, 0.12))
+        ctx.clear(Color(0.08, 0.10, 0.14))
         self.scene.render(ctx)
 
 if __name__ == "__main__":
-    app = App(title="Python Oxide Simulation", width=1280, height=720)
+    app = App(title="Oxide Python Workspace", width=1280, height=720)
     app.run(Simulation())
 ```
 
-Запуск:
-```bash
-python examples/python_simulation.py
+### Контекстный менеджер для сцены:
+```python
+with Scene() as scene:
+    cube = scene.spawn_cube_3d(1.0)
+    # По выходу из блока with автоматически вызывается scene.destroy()
 ```
 
 ---
 
 ## 3. Разработка на C / C++
 
-Подключите заголовок `oxide.h` и слинкуйте исполняемый файл с `oxide.lib` / `oxide.dll`:
+Заголовочный файл: [`include/oxide.h`](../../include/oxide.h)  
+Пример приложения: [`examples/c_app/main.c`](../../examples/c_app/main.c)
 
 ```c
 #include "oxide.h"
@@ -96,7 +133,7 @@ void on_update(OxideContext* ctx, float dt, void* user_data) {
 
 void on_render(OxideContext* ctx, void* user_data) {
     UserApp* app = (UserApp*)user_data;
-    OxideColor clear_col = {0.08f, 0.09f, 0.12f, 1.0f};
+    OxideColor clear_col = {0.08f, 0.10f, 0.14f, 1.0f};
     oxide_context_clear(ctx, clear_col);
     oxide_scene_render(app->scene, ctx);
 }
@@ -112,7 +149,10 @@ int main(void) {
         .user_data = &user_app
     };
 
+    // oxide_app_run поглощает и освобождает указатель app
     int result = oxide_app_run(app, callbacks);
+
+    // Обязательное ручное освобождение сцены
     oxide_scene_destroy(user_app.scene);
     return result;
 }
@@ -120,18 +160,23 @@ int main(void) {
 
 ---
 
-## 4. Спецификация C-функций API
+## 4. Сборка C-приложения
 
-| Функция | Назначение |
-| :--- | :--- |
-| `oxide_app_create(title, w, h)` | Выделяет структуру приложения в куче |
-| `oxide_app_run(app, callbacks)` | Запускает окно и цикл событий, передавая управление функциям обратного вызова |
-| `oxide_scene_create()` | Создает независимый граф сцены |
-| `oxide_scene_spawn_cube_3d(scene, size, transform)` | Создает 3D куб с коллидером |
-| `oxide_scene_spawn_sphere_3d(scene, radius, transform)` | Создает 3D сферу с коллидером |
-| `oxide_scene_spawn_surface_2d(scene, size, color, transform)` | Создает 2D поверхность |
-| `oxide_scene_spawn_text_2d(scene, text, color, scale, transform)` | Создает 2D текст |
-| `oxide_scene_check_collision(scene, id_a, id_b, out_contact)` | Возвращает `true`, если обнаружено пересечение |
-| `oxide_scene_resolve_penetration(scene, id_a, id_b, contact)` | Кинематически расталкивает объекты |
-| `oxide_context_clear(ctx, color)` | Очищает цвет и глубину кадра |
-| `oxide_context_get_fps(ctx)` | Возвращает актуальный FPS |
+### Сборка библиотеки Oxide:
+```bash
+cargo build --release
+```
+
+### Сборка через CMake:
+```bash
+cd examples/c_app
+cmake -B build
+cmake --build build --config Release
+```
+
+### Сборка через Makefile:
+```bash
+cd examples/c_app
+make
+./c_app
+```

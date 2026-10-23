@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+/// System time tracker providing delta time, total elapsed time, and FPS calculation.
 pub struct Time {
     start_time: Instant,
     last_frame_time: Instant,
@@ -12,6 +13,7 @@ pub struct Time {
 }
 
 impl Time {
+    /// Creates a new time tracker initialized to current clock instant.
     pub fn new() -> Self {
         let now = Instant::now();
         Self {
@@ -26,6 +28,7 @@ impl Time {
         }
     }
 
+    /// Advances frame timing state, recalculates delta time (clamped to 0.1s), and updates FPS accumulator.
     pub fn update(&mut self) {
         let now = Instant::now();
         let duration = now.duration_since(self.last_frame_time);
@@ -44,21 +47,25 @@ impl Time {
         }
     }
 
+    /// Returns time elapsed during the preceding frame in seconds ($\Delta t$).
     #[inline]
     pub fn delta_time(&self) -> f32 {
         self.delta_time
     }
 
+    /// Returns total runtime elapsed since engine startup in seconds.
     #[inline]
     pub fn elapsed(&self) -> f32 {
         self.elapsed_time
     }
 
+    /// Returns total count of frames processed since startup.
     #[inline]
     pub fn frame_count(&self) -> u64 {
         self.frame_count
     }
 
+    /// Returns measured frames per second averaged over the last 1.0s window.
     #[inline]
     pub fn fps(&self) -> f32 {
         self.fps

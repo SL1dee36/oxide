@@ -1,3 +1,5 @@
+//! Font parsing, glyph atlas rasterization, and 2D text graphics pipeline.
+
 pub mod atlas;
 pub mod font;
 pub mod pipeline_text;
