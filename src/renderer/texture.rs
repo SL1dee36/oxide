@@ -53,7 +53,7 @@ impl Texture2D {
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
-                Some(pixels),
+                glow::PixelUnpackData::Slice(Some(pixels)),
             );
 
             gl.generate_mipmap(glow::TEXTURE_2D);

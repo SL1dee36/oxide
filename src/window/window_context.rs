@@ -4,12 +4,12 @@ use glutin::context::{ContextApi, ContextAttributesBuilder, NotCurrentGlContext,
 use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::surface::{GlSurface, Surface, WindowSurface, SwapInterval};
 use glutin_winit::{DisplayBuilder, GlWindow};
-use raw_window_handle::HasRawWindowHandle;
+use raw_window_handle::HasWindowHandle;
 use std::ffi::CString;
 use std::num::NonZeroU32;
 use winit::dpi::LogicalSize;
-use winit::event_loop::EventLoop;
-use winit::window::{Window, WindowBuilder};
+use winit::event_loop::ActiveEventLoop;
+use winit::window::Window;
 
 /// Encapsulates OS window handle, Glutin context, surface, and Glow OpenGL bindings.
 pub struct WindowContext {
@@ -29,9 +29,9 @@ impl WindowContext {
         title: &str,
         width: u32,
         height: u32,
-        event_loop: &EventLoop<()>,
+        event_loop: &ActiveEventLoop,
     ) -> Result<Self, OxideError> {
-        let window_builder = WindowBuilder::new()
+        let window_attributes = Window::default_attributes()
             .with_title(title)
             .with_inner_size(LogicalSize::new(width as f64, height as f64));
 
@@ -39,7 +39,7 @@ impl WindowContext {
             .with_alpha_size(8)
             .prefer_hardware_accelerated(Some(true));
 
-        let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
+        let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes));
 
         let (window, gl_config) = display_builder
             .build(event_loop, template, |configs| {
@@ -59,7 +59,10 @@ impl WindowContext {
             OxideError::WindowCreation("Failed to create winit window".to_string())
         })?;
 
-        let raw_window_handle = window.raw_window_handle();
+        let raw_window_handle = window
+            .window_handle()
+            .map_err(|e| OxideError::WindowCreation(e.to_string()))?
+            .as_raw();
 
         let gl_display = gl_config.display();
 
@@ -73,7 +76,9 @@ impl WindowContext {
                 .map_err(|e| OxideError::ContextError(e.to_string()))?
         };
 
-        let attrs = window.build_surface_attributes(Default::default());
+        let attrs = window
+            .build_surface_attributes(Default::default())
+            .map_err(|e| OxideError::ContextError(e.to_string()))?;
         let gl_surface = unsafe {
             gl_config
                 .display()
