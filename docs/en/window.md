@@ -1,6 +1,6 @@
 # Subsystem `window` — Window Subsystem and Graphics Context
 
-The `window` module handles operating system window creation, display framebuffer configuration, hardware OpenGL 3.3 Core Profile context initialization, and double-buffer presentation management.
+The `window` module handles operating system window creation, display framebuffer configuration, hardware OpenGL 4.5 Core Profile context initialization, and double-buffer presentation management.
 
 Source code: [`src/window/`](../../src/window/)
 
@@ -9,10 +9,10 @@ Source code: [`src/window/`](../../src/window/)
 ## 1. Window Integration Stack
 
 The windowing and graphics driver connection is established using the following low-level crates:
-- **`winit 0.29`**: OS-native window creation (Windows, Linux, macOS) and window manager event polling (resizing, focus, redraw requests, keyboard/mouse input).
-- **`glutin 0.31` & `glutin-winit 0.4`**: Cross-platform OpenGL graphics context creation, framebuffer format negotiation (RGBA8, 24-bit depth, 8-bit stencil), and vertical synchronization configuration.
-- **`raw-window-handle 0.5`**: Low-level platform window handle interoperability (`HWND`, `Xlib Window`, `NSWindow`) bridging `glutin` and `winit`.
-- **`glow 0.13`**: Dynamic function pointer loading (`gl_display.get_proc_address`) exposing a type-safe Rust OpenGL interface.
+- **`winit 0.30`**: OS-native window creation (Windows, Linux, macOS) and window manager event polling (resizing, focus, redraw requests, keyboard/mouse input).
+- **`glutin 0.32` & `glutin-winit 0.5`**: Cross-platform OpenGL graphics context creation, framebuffer format negotiation (RGBA8, 24-bit depth, 8-bit stencil), and vertical synchronization configuration.
+- **`raw-window-handle 0.6`**: Low-level platform window handle interoperability (`HWND`, `Xlib Window`, `NSWindow`) bridging `glutin` and `winit`.
+- **`glow 0.16`**: Dynamic function pointer loading (`gl_display.get_proc_address`) exposing a type-safe Rust OpenGL interface.
 
 ---
 
@@ -40,9 +40,9 @@ pub struct WindowContext {
 ## 3. Initialization Sequence
 
 Calling `WindowContext::new(title, width, height, event_loop)` executes the following deterministic sequence:
-1. **Window Builder Configuration:** Configures a `WindowBuilder` with the requested title and logical pixel resolution (`winit::dpi::LogicalSize`).
+1. **Window Configuration:** Configures `WindowAttributes` with the requested title and logical pixel resolution (`winit::dpi::LogicalSize`).
 2. **Display Configuration Negotiation:** `ConfigTemplateBuilder` requests an 8-bit alpha channel and hardware acceleration (`prefer_hardware_accelerated(Some(true))`). A reduction filter selects the framebuffer configuration with maximum multisample anti-aliasing (MSAA) samples.
-3. **OpenGL Profile Specification:** Constructs `ContextAttributesBuilder` requiring **OpenGL 3.3 Core Profile** (`ContextApi::OpenGl(Some(Version::new(3, 3)))`).
+3. **OpenGL Profile Specification:** Constructs `ContextAttributesBuilder` requiring **OpenGL 4.5 Core Profile** (`ContextApi::OpenGl(Some(Version::new(4, 5)))`).
 4. **Surface Allocation and Activation:** The window surface is created via `gl_config.create_window_surface`, after which the inactive context is made current (`make_current(&gl_surface)`).
 5. **VSync Synchronization:** Enables vertical synchronization via `SwapInterval::Wait(NonZeroU32::new(1))` to prevent screen tearing.
 6. **Driver Function Pointer Loading:** `glow::Context::from_loader_function` loads OpenGL function pointers using C strings passed to `gl_display.get_proc_address`.

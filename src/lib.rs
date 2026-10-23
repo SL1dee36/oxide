@@ -21,7 +21,7 @@ pub mod math;
 pub mod physics;
 /// Commonly used engine types and functions for unified import.
 pub mod prelude;
-/// OpenGL 3.3 Core Profile graphics pipelines, shaders, and GPU buffers.
+/// OpenGL 4.5 Core Profile graphics pipelines, shaders, and GPU buffers.
 pub mod renderer;
 /// Hierarchical scene graph, spatial nodes, camera projections, and transforms.
 pub mod spatial;

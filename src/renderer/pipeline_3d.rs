@@ -6,7 +6,7 @@ use crate::renderer::texture::Texture2D;
 use glam::{Mat4, Vec3};
 use glow::HasContext;
 
-const VERTEX_SHADER_3D: &str = r#"#version 330 core
+const VERTEX_SHADER_3D: &str = r#"#version 450 core
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec3 a_normal;
 layout(location = 2) in vec2 a_uv;
@@ -29,7 +29,7 @@ void main() {
 }
 "#;
 
-const FRAGMENT_SHADER_3D: &str = r#"#version 330 core
+const FRAGMENT_SHADER_3D: &str = r#"#version 450 core
 in vec3 v_normal;
 in vec2 v_uv;
 in vec3 v_frag_pos;

@@ -1,6 +1,6 @@
 # Subsystem `renderer` — Graphics Pipelines and VRAM Resources
 
-The `renderer` module implements OpenGL 3.3 Core Profile graphics pipelines, GLSL shader compilation, GPU buffer allocations, and texture resource management.
+The `renderer` module implements OpenGL 4.5 Core Profile graphics pipelines, GLSL shader compilation, GPU buffer allocations, and texture resource management.
 
 Source code: [`src/renderer/`](../../src/renderer/)
 
@@ -44,7 +44,7 @@ graph LR
 
 ## 3. Shader Programs (`ShaderProgram`)
 
-`ShaderProgram` coordinates vertex and fragment GLSL 330 core compilation and uniform variable updates:
+`ShaderProgram` coordinates vertex and fragment GLSL 450 core compilation and uniform variable updates:
 
 ```rust
 pub struct ShaderProgram { /* id: glow::Program */ }

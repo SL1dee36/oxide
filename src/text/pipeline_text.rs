@@ -6,7 +6,7 @@ use crate::text::atlas::FontAtlas;
 use glam::{Mat4, Vec2};
 use glow::HasContext;
 
-const VERTEX_SHADER_TEXT: &str = r#"#version 330 core
+const VERTEX_SHADER_TEXT: &str = r#"#version 450 core
 layout(location = 0) in vec2 a_position;
 layout(location = 1) in vec2 a_uv;
 
@@ -20,7 +20,7 @@ void main() {
 }
 "#;
 
-const FRAGMENT_SHADER_TEXT: &str = r#"#version 330 core
+const FRAGMENT_SHADER_TEXT: &str = r#"#version 450 core
 in vec2 v_uv;
 
 uniform vec4 u_color;

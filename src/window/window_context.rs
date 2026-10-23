@@ -1,6 +1,6 @@
 use crate::core::error::OxideError;
 use glutin::config::{ConfigTemplateBuilder, GlConfig};
-use glutin::context::{ContextApi, ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentContext, Version};
+use glutin::context::{ContextApi, ContextAttributesBuilder, GlProfile, NotCurrentGlContext, PossiblyCurrentContext, Version};
 use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::surface::{GlSurface, Surface, WindowSurface, SwapInterval};
 use glutin_winit::{DisplayBuilder, GlWindow};
@@ -24,7 +24,7 @@ pub struct WindowContext {
 }
 
 impl WindowContext {
-    /// Creates a window and initializes an OpenGL 3.3 Core Profile graphics context.
+    /// Creates a window and initializes an OpenGL 4.5 Core Profile graphics context.
     pub fn new(
         title: &str,
         width: u32,
@@ -67,7 +67,8 @@ impl WindowContext {
         let gl_display = gl_config.display();
 
         let context_attributes = ContextAttributesBuilder::new()
-            .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
+            .with_context_api(ContextApi::OpenGl(Some(Version::new(4, 5))))
+            .with_profile(GlProfile::Core)
             .build(Some(raw_window_handle));
 
         let not_current_gl_context = unsafe {

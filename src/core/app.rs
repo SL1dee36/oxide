@@ -190,7 +190,7 @@ impl AppBuilder {
         self
     }
 
-    /// Initializes OS window, OpenGL 3.3 Core context, and executes the blocking event/frame loop.
+    /// Initializes OS window, OpenGL 4.5 Core context, and executes the blocking event/frame loop.
     pub fn run<H: AppHandler + 'static>(self, handler: H) -> Result<(), OxideError> {
         let event_loop = EventLoop::new().map_err(|e| OxideError::WindowCreation(e.to_string()))?;
         event_loop.set_control_flow(ControlFlow::Poll);

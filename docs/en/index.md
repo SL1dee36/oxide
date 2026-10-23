@@ -1,6 +1,6 @@
 # Oxide Architecture Guide
 
-Oxide is a modular 2D/3D rendering, spatial hierarchy, and collision detection engine written in Rust with an OpenGL 3.3 Core Profile graphics backend. It provides decoupled subsystems for real-time graphics, transform hierarchies, geometric collision queries, and multi-language embedding via a C99 ABI.
+Oxide is a modular 2D/3D rendering, spatial hierarchy, and collision detection engine written in Rust with an OpenGL 4.5 Core Profile graphics backend. It provides decoupled subsystems for real-time graphics, transform hierarchies, geometric collision queries, and multi-language embedding via a C99 ABI.
 
 ---
 
@@ -58,7 +58,7 @@ sequenceDiagram
 | Module | File | Subsystem Description |
 | :--- | :--- | :--- |
 | **`core`** | [`core.md`](core.md) | Application lifecycle (`App`), execution context (`Context`), timing (`Time`), input polling (`InputState`), typed errors (`OxideError`). |
-| **`window`** | [`window.md`](window.md) | OS window initialization, OpenGL 3.3 Core context binding (`WindowContext`), viewport configuration. |
+| **`window`** | [`window.md`](window.md) | OS window initialization, OpenGL 4.5 Core context binding (`WindowContext`), viewport configuration. |
 | **`renderer`** | [`renderer.md`](renderer.md) | Graphics pipelines (`Pipeline3D`, `Pipeline2D`), GLSL shader programs (`ShaderProgram`), GPU buffers (`VertexArray`, `VertexBuffer`, `IndexBuffer`), textures (`Texture2D`). |
 | **`spatial`** | [`spatial.md`](spatial.md) | Hierarchical scene graph (`Scene`, `SpatialNode`), spatial transforms (`Transform`), perspective and orthographic camera models (`Camera`). |
 | **`collision`** | [`collision.md`](collision.md) | Geometric collision detection (`Collider`: Box3D, Sphere, Box2D), contact manifolds (`ContactManifold`), raycasting (`Ray3D`, `RaycastHit`). |

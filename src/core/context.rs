@@ -5,7 +5,7 @@ use glow::HasContext;
 
 /// Per-frame execution context granting access to graphics primitives, viewport geometry, input, and timing.
 pub struct Context<'a> {
-    /// Underlying OpenGL 3.3 Core interface.
+    /// Underlying OpenGL 4.5 Core interface.
     pub gl: &'a glow::Context,
     /// Reference to OS window.
     pub window: &'a winit::window::Window,
