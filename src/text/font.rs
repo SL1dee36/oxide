@@ -9,6 +9,8 @@ pub struct Font {
     inner: Arc<FontdueFont>,
 }
 
+const DEFAULT_FALLBACK_FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/DejaVuSans.ttf");
+
 impl Font {
     /// Parses font metadata and glyph outlines from an in-memory byte slice.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, OxideError> {
@@ -26,14 +28,23 @@ impl Font {
         Self::from_bytes(&bytes)
     }
 
-    /// Attempts to locate and load a default TrueType font, checking project assets then standard OS paths.
+    /// Attempts to locate and load a default TrueType font, checking project assets then standard OS paths,
+    /// falling back to embedded font data if no filesystem font is found.
     pub fn default_font() -> Result<Self, OxideError> {
         let candidate_paths = [
             "assets/fonts/DejaVuSans.ttf",
+            "../assets/fonts/DejaVuSans.ttf",
+            "../../assets/fonts/DejaVuSans.ttf",
+            "C:\\Windows\\Fonts\\arial.ttf",
+            "C:\\Windows\\Fonts\\segoeui.ttf",
             "C:\\Windows\\Fonts\\DejaVuSans.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "C:\\Windows\\Fonts\\segoeui.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
             "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/SFNS.ttf",
+            "/Library/Fonts/Arial.ttf",
         ];
 
         for path in candidate_paths {
@@ -44,9 +55,7 @@ impl Font {
             }
         }
 
-        Err(OxideError::TextureError(
-            "No compatible system or local font found".to_string(),
-        ))
+        Self::from_bytes(DEFAULT_FALLBACK_FONT_BYTES)
     }
 
     /// Returns a direct reference to the internal [`fontdue::Font`] structure.

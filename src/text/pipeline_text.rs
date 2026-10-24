@@ -48,15 +48,21 @@ pub struct PipelineText {
     vbo: VertexBuffer,
     ebo: IndexBuffer,
     projection: Mat4,
+    vertex_batch: Vec<TextVertex>,
+    index_batch: Vec<u32>,
 }
 
 impl PipelineText {
-    /// Compiles text vertex and fragment shaders and allocates dynamic geometry buffers.
+    /// Compiles text vertex and fragment shaders and allocates dynamic geometry buffers with preallocated capacity.
     pub fn new(gl: &glow::Context) -> Result<Self, OxideError> {
+        const INITIAL_GLYPH_CAPACITY: usize = 1024;
+        let vertex_capacity = INITIAL_GLYPH_CAPACITY * 4;
+        let index_capacity = INITIAL_GLYPH_CAPACITY * 6;
+
         let shader = ShaderProgram::new(gl, VERTEX_SHADER_TEXT, FRAGMENT_SHADER_TEXT)?;
         let vao = VertexArray::new(gl)?;
-        let vbo = VertexBuffer::new_dynamic(gl, &[] as &[TextVertex])?;
-        let ebo = IndexBuffer::new_dynamic(gl, &[] as &[u32])?;
+        let vbo = VertexBuffer::with_capacity::<TextVertex>(gl, vertex_capacity)?;
+        let ebo = IndexBuffer::with_capacity(gl, index_capacity)?;
 
         vao.bind(gl);
         vbo.bind(gl);
@@ -83,6 +89,8 @@ impl PipelineText {
             vbo,
             ebo,
             projection: Mat4::IDENTITY,
+            vertex_batch: Vec::with_capacity(vertex_capacity),
+            index_batch: Vec::with_capacity(index_capacity),
         })
     }
 
@@ -108,7 +116,7 @@ impl PipelineText {
         self.shader.set_int(gl, "u_atlas", 0);
     }
 
-    /// Batches characters from `text` into quad vertices and submits a single draw call.
+    /// Batches characters from `text` into quad vertices and submits a single draw call without heap reallocations.
     pub fn draw_text(
         &mut self,
         gl: &glow::Context,
@@ -122,8 +130,8 @@ impl PipelineText {
             return Ok(());
         }
 
-        let mut vertices: Vec<TextVertex> = Vec::with_capacity(text.len() * 4);
-        let mut indices: Vec<u32> = Vec::with_capacity(text.len() * 6);
+        self.vertex_batch.clear();
+        self.index_batch.clear();
 
         let mut cursor_x = origin.x;
         let mut cursor_y = origin.y;
@@ -143,26 +151,26 @@ impl PipelineText {
                     let gw = glyph.size.x * scale;
                     let gh = glyph.size.y * scale;
 
-                    let base_idx = vertices.len() as u32;
+                    let base_idx = self.vertex_batch.len() as u32;
 
-                    vertices.push(TextVertex {
+                    self.vertex_batch.push(TextVertex {
                         position: [gx, gy],
                         uv: [glyph.uv_min.x, glyph.uv_min.y],
                     });
-                    vertices.push(TextVertex {
+                    self.vertex_batch.push(TextVertex {
                         position: [gx + gw, gy],
                         uv: [glyph.uv_max.x, glyph.uv_min.y],
                     });
-                    vertices.push(TextVertex {
+                    self.vertex_batch.push(TextVertex {
                         position: [gx + gw, gy + gh],
                         uv: [glyph.uv_max.x, glyph.uv_max.y],
                     });
-                    vertices.push(TextVertex {
+                    self.vertex_batch.push(TextVertex {
                         position: [gx, gy + gh],
                         uv: [glyph.uv_min.x, glyph.uv_max.y],
                     });
 
-                    indices.extend_from_slice(&[
+                    self.index_batch.extend_from_slice(&[
                         base_idx,
                         base_idx + 1,
                         base_idx + 2,
@@ -178,15 +186,15 @@ impl PipelineText {
             }
         }
 
-        if vertices.is_empty() {
+        if self.vertex_batch.is_empty() {
             return Ok(());
         }
 
         self.shader.set_vec4(gl, "u_color", color.to_vec4());
         atlas.texture.bind(gl, 0);
 
-        self.vbo.update(gl, &vertices);
-        self.ebo.update(gl, &indices);
+        self.vbo.update_sub_data(gl, 0, &self.vertex_batch);
+        self.ebo.update_sub_data(gl, 0, &self.index_batch);
 
         self.vao.bind(gl);
         self.ebo.bind(gl);
@@ -202,6 +210,11 @@ impl PipelineText {
         self.ebo.unbind(gl);
 
         Ok(())
+    }
+
+    /// Returns the CPU buffer capacities `(vertex_capacity, index_capacity)`.
+    pub fn batch_capacities(&self) -> (usize, usize) {
+        (self.vertex_batch.capacity(), self.index_batch.capacity())
     }
 
     /// Restores depth testing and disables blending upon pass completion.
