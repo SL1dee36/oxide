@@ -266,3 +266,72 @@ fn test_mesh_nodes_without_rigid_body_separate_properly() {
     assert!((tf_a.translation.x - (-0.1)).abs() < 1e-4);
     assert!((tf_b.translation.x - 0.9).abs() < 1e-4);
 }
+
+#[test]
+fn test_rotated_obb_sphere_collision() {
+    let rot = glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_4);
+    let mat_box = Mat4::from_rotation_translation(rot, Vec3::ZERO);
+    let obb = Obb3D::from_matrix(Vec3::ONE, &mat_box);
+
+    // Point in the empty corner of the axis-aligned bounding box (should NOT collide with OBB)
+    let sphere_outside = BoundingSphere::new(Vec3::new(1.3, 0.0, 1.3), 0.1);
+    assert!(obb.contact_sphere(&sphere_outside).is_none());
+
+    // Sphere touching the rotated tip along +X (tip is at sqrt(2) ~ 1.414)
+    let sphere_touching = BoundingSphere::new(Vec3::new(1.45, 0.0, 0.0), 0.1);
+    let contact = obb
+        .contact_sphere(&sphere_touching)
+        .expect("Sphere should collide with rotated tip");
+    assert!(contact.depth > 0.0);
+    assert!((contact.normal.x - 1.0).abs() < 0.2);
+}
+
+#[test]
+fn test_rotated_obb_vs_obb_collision() {
+    let rot = glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_4);
+    let obb_a = Obb3D::from_matrix(Vec3::ONE, &Mat4::from_rotation_translation(rot, Vec3::ZERO));
+    let obb_b = Obb3D::from_matrix(
+        Vec3::ONE,
+        &Mat4::from_rotation_translation(rot, Vec3::new(2.2, 0.0, 0.0)),
+    );
+
+    // Rotated tips penetrate along X (1.414 + 1.414 = 2.828 > 2.2)
+    let contact = obb_a.contact(&obb_b).expect("Rotated OBBs must collide");
+    assert!(contact.depth > 0.0);
+    // Face normals of 45-degree rotated boxes have X component equal to 1/sqrt(2) ~ 0.7071
+    assert!((contact.normal.x - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3);
+
+    // Far away box does not collide
+    let obb_b_far = Obb3D::from_matrix(
+        Vec3::ONE,
+        &Mat4::from_rotation_translation(rot, Vec3::new(3.0, 0.0, 0.0)),
+    );
+    assert!(obb_a.contact(&obb_b_far).is_none());
+
+    // Box in the empty corner of A's AABB does not collide
+    let obb_b_corner = Obb3D::from_matrix(
+        Vec3::splat(0.3),
+        &Mat4::from_translation(Vec3::new(1.5, 0.0, 1.5)),
+    );
+    assert!(obb_a.contact(&obb_b_corner).is_none());
+}
+
+#[test]
+fn test_raycast_rotated_obb() {
+    let rot = glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_4);
+    let mat_box = Mat4::from_rotation_translation(rot, Vec3::ZERO);
+    let obb = Obb3D::from_matrix(Vec3::ONE, &mat_box);
+
+    // Ray passing through empty corner (1.3, y, 1.3) of old AABB should MISS the rotated OBB
+    let ray_miss = Ray3D::new(Vec3::new(1.3, 5.0, 1.3), Vec3::new(0.0, -1.0, 0.0));
+    assert!(obb.raycast(&ray_miss).is_none());
+
+    // Ray aimed directly at the front tip along +Z should HIT
+    let ray_hit = Ray3D::new(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, -1.0));
+    let hit = obb
+        .raycast(&ray_hit)
+        .expect("Ray should hit front tip of rotated OBB");
+    assert!((hit.point.z - std::f32::consts::SQRT_2).abs() < 1e-3);
+    assert!((hit.distance - (5.0 - std::f32::consts::SQRT_2)).abs() < 1e-3);
+    assert!(hit.normal.z > 0.0);
+}

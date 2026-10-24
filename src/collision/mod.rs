@@ -7,6 +7,7 @@ pub mod systems;
 
 pub use collider::{
     resolve_penetration, resolve_penetration_weighted, Aabb2D, Aabb3D, BoundingSphere, Collider,
+    Obb3D,
 };
 pub use manifold::ContactManifold;
 pub use ray::{Ray3D, RaycastHit};
