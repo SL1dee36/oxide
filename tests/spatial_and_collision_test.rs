@@ -237,3 +237,32 @@ fn test_despawn_mesh_gpu_cleanup_queue() {
     assert_eq!(drained.len(), 1);
     assert_eq!(world.pending_gpu_cleanup.len(), 0);
 }
+
+#[test]
+fn test_mesh_nodes_without_rigid_body_separate_properly() {
+    let mut world = World::new();
+
+    let a = world.spawn_mesh_3d(
+        Mesh3D::cube(1.0),
+        Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+        Collider::box_3d(Vec3::ONE),
+    );
+    let b = world.spawn_mesh_3d(
+        Mesh3D::cube(1.0),
+        Transform::from_translation(Vec3::new(0.8, 0.0, 0.0)),
+        Collider::box_3d(Vec3::ONE),
+    );
+
+    assert!(!world.is_static(a));
+    assert!(!world.is_static(b));
+
+    let contact = ContactManifold::new(Vec3::X, 0.2, Vec3::new(0.4, 0.0, 0.0));
+    world.resolve_penetration(a, b, &contact);
+
+    let tf_a = world.transform(a).unwrap();
+    let tf_b = world.transform(b).unwrap();
+
+    // Both should be pushed away by half of the penetration depth (0.1)
+    assert!((tf_a.translation.x - (-0.1)).abs() < 1e-4);
+    assert!((tf_b.translation.x - 0.9).abs() < 1e-4);
+}

@@ -51,11 +51,12 @@ pub fn step_physics_system_with_config(world: &mut World, dt: f32, config: &Phys
 /// Simulates 6-DOF rigid body dynamics: force integration, position update, collision detection, and impulse solving.
 pub fn step_rigid_body_system(world: &mut World, dt: f32, config: &PhysicsConfig) {
     // Phase 1: Force and torque integration (velocity & angular velocity update)
-    for (_entity, body) in &mut world.rigid_body {
+    for (entity, body) in &mut world.rigid_body {
         if body.is_dynamic() {
             let accel = config.gravity + body.force_accumulator * body.inv_mass;
             body.velocity += accel * dt;
-            let ang_accel = body.inv_inertia_local * body.torque_accumulator;
+            let rot = world.transform.get(entity).map_or(Quat::IDENTITY, |t| t.rotation);
+            let ang_accel = body.inv_inertia_world(rot) * body.torque_accumulator;
             body.angular_velocity += ang_accel * dt;
 
             // Apply damping
@@ -102,8 +103,10 @@ pub fn step_rigid_body_system(world: &mut World, dt: f32, config: &PhysicsConfig
             let a = collider_entities[i];
             let b = collider_entities[j];
 
-            // Prune static-static pairs immediately before intersection testing
-            if world.is_static(a) && world.is_static(b) {
+            // Prune pairs where both bodies are non-dynamic obstacles
+            let is_static_a = world.rigid_body.get(a).is_none_or(|rb| !rb.is_dynamic());
+            let is_static_b = world.rigid_body.get(b).is_none_or(|rb| !rb.is_dynamic());
+            if is_static_a && is_static_b {
                 continue;
             }
 
@@ -299,8 +302,8 @@ fn resolve_rigid_body_position_penetration(
     contact: &crate::collision::manifold::ContactManifold,
     iterations: usize,
 ) {
-    let is_static_a = world.is_static(a);
-    let is_static_b = world.is_static(b);
+    let is_static_a = world.rigid_body.get(a).is_none_or(|rb| !rb.is_dynamic());
+    let is_static_b = world.rigid_body.get(b).is_none_or(|rb| !rb.is_dynamic());
 
     if is_static_a && is_static_b {
         return;
