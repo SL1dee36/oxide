@@ -1,27 +1,25 @@
-# Subsystem `collision` — Geometric Collision Detection and Raycasting
+# Module `collision` — Geometric Collision Detection, OBB/SAT, Broadphase, and Raycasting
 
-The `collision` module provides geometric intersection testing algorithms, contact manifold generation, kinematic penetration resolution, and analytical raycasting.
-
-> **Architectural Note:** The `collision` subsystem performs geometric collision detection and is **not a rigid body dynamics physics engine**. It does not model momentum, angular inertia tensors, friction, or dynamic constraint solvers. It solely evaluates geometric overlap queries and applies kinematic separation.
+The `collision` module delivers high-performance geometric intersection algorithms, Oriented Bounding Boxes (`Obb3D`) powered by the Separating Axis Theorem (SAT), a conservative Sort-and-Sweep broadphase stage (`BroadphaseGrid`), kinematic penetration resolution, and raycasting.
 
 Source code: [`src/collision/`](../../src/collision/)
 
 ---
 
-## 1. Relationship Between Spatial Transforms and Colliders
+## 1. ECS Entity and Collider Integration
 
-Each scene graph entity (`SpatialNode`) optionally holds a local bounding volume (`collider: Option<Collider>`).
+In Oxide's ECS architecture, collision components reside in the component table `world.collider: SecondaryMap<EntityId, Collider>`.
 
-During intersection testing, `Collider` geometries are transformed into world coordinates via `SpatialNode::global_matrix()`:
-- **Box3D:** The local axis-aligned box is transformed by the $4 \times 4$ affine matrix into a conservative world `Aabb3D` using absolute column vector projections.
-- **Sphere:** The center is transformed via `matrix.transform_point3(Vec3::ZERO)`, and the radius scales uniformly.
-- **Box2D:** Dimensions and translation map directly to 2D pixel coordinates.
+During collision evaluation, `Collider` primitives are evaluated in world space using `world.global_transform_matrix(entity)`:
+- **Box3D:** Evaluated as an oriented bounding box `Obb3D::from_matrix`, accurately preserving rotation angles and scale without artificial bounding box expansion.
+- **Sphere:** Center translates to `matrix.transform_point3(Vec3::ZERO)`, with radius scaled by the maximum coordinate scale factor.
+- **Box2D:** Evaluated as screen-space rectangular extents.
 
 ---
 
-## 2. Bounding Volume Types (`Collider`)
+## 2. Bounding Volume Primitives (`Collider`)
 
-The `Collider` enumeration specifies bounding geometry in the node's local coordinate frame:
+The `Collider` enum defines geometry in the entity's local coordinate frame:
 
 ```rust
 pub enum Collider {
@@ -31,92 +29,91 @@ pub enum Collider {
 }
 ```
 
-Constructors:
-- `Collider::box_3d(size: Vec3) -> Self` — Takes full dimensions `(dx, dy, dz)` and stores half-extents `size * 0.5`.
-- `Collider::sphere(radius: f32) -> Self` — Defines a sphere of radius `radius`.
-- `Collider::box_2d(size: Vec2) -> Self` — Takes full pixel dimensions `(w, h)` and stores half-extents `size * 0.5`.
+### Constructors & Methods:
+- `Collider::box_3d(size: Vec3) -> Self` — Takes total dimensions `(dx, dy, dz)` and stores half-extents `size * 0.5`.
+- `Collider::sphere(radius: f32) -> Self` — Defines a bounding sphere with radius.
+- `Collider::box_2d(size: Vec2) -> Self` — Defines a 2D planar rectangle in screen pixels.
+- `Collider::world_aabb(&self, matrix: &Mat4) -> Aabb3D` — Computes a conservative world-space AABB for broadphase acceleration.
 
 ---
 
-## 3. Mathematical Bounding Volumes
+## 3. Mathematical Volumes
 
-### `Aabb3D` (3D Axis-Aligned Bounding Box)
+### `Obb3D` (Oriented Bounding Box)
+```rust
+pub struct Obb3D {
+    pub center: Vec3,
+    pub axes: [Vec3; 3],       // Orthonormal world-space axes X, Y, Z
+    pub half_extents: Vec3,  // Scaled half-extents
+}
+```
+- `from_matrix(half_extents: Vec3, matrix: &Mat4) -> Self` — Constructs an OBB from half-extents and a world transform matrix.
+- `contact(&self, other: &Self) -> Option<ContactManifold>` — Exact OBB vs OBB test using the **Separating Axis Theorem (SAT)** across 15 candidate axes (6 face normals + 9 edge-edge cross products).
+- `contact_sphere(&self, sphere: &BoundingSphere) -> Option<ContactManifold>` — Exact OBB vs Sphere intersection by transforming sphere center into the OBB's local orthonormal basis.
+- `raycast(&self, ray: &Ray3D) -> Option<RaycastHit>` — Local-space raycast via slab method on the local AABB.
+
+### `Aabb3D` (Axis-Aligned Bounding Box)
 ```rust
 pub struct Aabb3D {
     pub min: Vec3,
     pub max: Vec3,
 }
 ```
-- `from_center_half_extents(center: Vec3, half_extents: Vec3) -> Self`
-- `transform(&self, matrix: &Mat4) -> Self` — Evaluates a conservative world AABB enclosing the transformed box.
-- `intersects(&self, other: &Self) -> bool` — Overlap evaluation along X, Y, and Z axes.
-- `contact(&self, other: &Self) -> Option<ContactManifold>` — Computes minimum overlap axis, penetration depth, and normal.
-- `contact_sphere(&self, sphere: &BoundingSphere) -> Option<ContactManifold>` — Computes closest-point distance between AABB and sphere.
+Provides conservative volume wrapping for broadphase culling (`BroadphaseGrid`), hierarchical acceleration, and spatial partitioning.
 
-### `BoundingSphere` (3D Bounding Sphere)
+### `BoundingSphere` (Spherical Volume)
 ```rust
 pub struct BoundingSphere {
     pub center: Vec3,
     pub radius: f32,
 }
 ```
-- `intersects(&self, other: &Self) -> bool` — Evaluates center distance squared: $\|\mathbf{c}_1 - \mathbf{c}_2\|^2 \le (r_1 + r_2)^2$.
-- `contact(&self, other: &Self) -> Option<ContactManifold>` — Generates contact along the center-to-center vector.
-
-### `Aabb2D` (2D Screen-Space AABB)
-```rust
-pub struct Aabb2D {
-    pub min: Vec2,
-    pub max: Vec2,
-}
-```
-Analytical overlap testing between 2D rectangles in screen coordinates.
+- `intersects(&self, other: &Self) -> bool` — Distance squared comparison: $\|\mathbf{c}_1 - \mathbf{c}_2\|^2 \le (r_1 + r_2)^2$.
+- `contact(&self, other: &Self) -> Option<ContactManifold>` — Computes contact normal along the center-to-center vector.
 
 ---
 
-## 4. Contact Manifold (`ContactManifold`)
+## 4. Broadphase Stage (`BroadphaseGrid` — Sort-and-Sweep)
 
-Upon intersection, an analytical `ContactManifold` is generated:
+To eliminate $O(N^2)$ pairwise checking over large scenes, the broadphase stage utilizes a Sweep-and-Prune / Sort-and-Sweep algorithm:
+
+```rust
+pub struct BroadphaseGrid {
+    proxies: Vec<BroadphaseProxy>,
+    pairs: Vec<BroadphasePair>,
+}
+```
+
+1. Each alive collider generates a conservative world-space `Aabb3D`.
+2. Proxies are sorted along the principal X-axis by `min.x` in $O(N \log N)$.
+3. Linear interval sweep along X prunes up to 99.9% of distant pairs before any costly SAT calculations occur.
+4. Pairs consisting of two immovable static objects are discarded immediately.
+5. Remaining candidate pairs are dispatched to narrowphase intersection testing.
+
+---
+
+## 5. Contact Manifold (`ContactManifold`)
 
 ```rust
 pub struct ContactManifold {
-    pub normal: glam::Vec3,
-    pub depth: f32,
-    pub point: glam::Vec3,
+    pub normal: glam::Vec3, // Unit normal pointing from body A to body B
+    pub depth: f32,         // Penetration depth along normal (> 0.0)
+    pub point: glam::Vec3,  // World-space contact position
 }
 ```
 
-- **`normal: Vec3`**: Unit vector along minimum separation axis, pointing from body A toward body B.
-- **`depth: f32`**: Penetration distance along separation normal ($> 0.0$).
-- **`point: Vec3`**: Estimated world-space contact location.
+---
+
+## 6. Kinematic Penetration Resolution (`resolve_penetration_system`)
+
+Resolves mutual geometric penetration along the contact normal:
+- **Both bodies dynamic:** Displacement is shared equally (50% / 50%).
+- **One body static:** The static obstacle remains immovable (0%), while the dynamic body receives 100% displacement.
+- **Both bodies static:** Displacements are ignored.
 
 ---
 
-## 5. Kinematic Penetration Resolution (`resolve_penetration`)
-
-Separates intersecting nodes along the contact normal without dynamic force modeling:
-
-```rust
-pub fn resolve_penetration_weighted(
-    transform_a: &mut Transform,
-    is_static_a: bool,
-    transform_b: &mut Transform,
-    is_static_b: bool,
-    contact: &ContactManifold,
-);
-```
-
-### Displacement Allocation:
-1. **Both bodies dynamic (`is_static == false`):** Separation displacement is split equally (50% / 50%):
-   $$\mathbf{T}_a \leftarrow \mathbf{T}_a - \mathbf{n} \cdot \frac{d}{2}, \quad \mathbf{T}_b \leftarrow \mathbf{T}_b + \mathbf{n} \cdot \frac{d}{2}$$
-2. **One body static (`is_static == true`):** The static obstacle receives 0% displacement, and the dynamic body receives 100% of the displacement vector ($d$).
-3. **Both bodies static:** Displacements are ignored.
-
----
-
-## 6. Raycasting (`Ray3D`, `RaycastHit`)
-
-Provides spatial intersection testing for line-of-sight checks and entity picking:
+## 7. Raycasting (`Ray3D`, `RaycastHit`)
 
 ```rust
 pub struct Ray3D {
@@ -125,12 +122,10 @@ pub struct Ray3D {
 }
 
 pub struct RaycastHit {
-    pub distance: f32,  // Parametric distance t >= 0.0
-    pub point: Vec3,     // World-space hit location
-    pub normal: Vec3,    // Outward surface normal at hit point
+    pub distance: f32,   // Parametric hit distance t >= 0.0
+    pub point: Vec3,      // World-space hit position
+    pub normal: Vec3,     // Outward surface normal at hit point
 }
 ```
 
-- **Slab Method:** `Aabb3D::raycast` computes analytical ray-plane intersection intervals.
-- **Quadratic Solution:** `BoundingSphere::raycast` solves the ray-sphere intersection quadratic equation.
-- **Scene Traversal:** `Scene::raycast(&self, ray: &Ray3D) -> Option<(NodeId, RaycastHit)>` tests all visible colliders and returns the hit record with minimal `distance`.
+The system `raycast_system(world: &World, ray: &Ray3D) -> Option<(EntityId, RaycastHit)>` queries all visible entities with colliders and returns the closest hit.

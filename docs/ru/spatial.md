@@ -53,64 +53,54 @@ pub enum Projection {
 
 ---
 
-## 3. Узел сцены (`SpatialNode`)
+---
 
-Каждый объект в графе сцены представлен структурой `SpatialNode`:
+## 3. Идентификация узлов и компоненты (`NodeId`, `Transform`)
 
-```rust
-pub struct SpatialNode {
-    pub id: NodeId,
-    pub name: String,
-    pub parent: Option<NodeId>,
-    pub children: Vec<NodeId>,
-    pub transform: Transform,
-    pub global_transform: Mat4,
-    pub kind: NodeKind,
-    pub collider: Option<Collider>,
-    pub visible: bool,
-    pub is_static: bool,
-    pub behavior: Option<Box<dyn NodeBehavior>>,
-}
-```
+В современной архитектуре Oxide каждый узел сцены является сущностью ECS ([`EntityId`](../ecs.md), для обратной совместимости доступен псевдоним `NodeId = EntityId`), а его свойства распределены по разреженным таблицам компонентов:
 
-### Разновидности полезной нагрузки (`NodeKind`):
-- `NodeKind::Empty` — точка привязки, вспомогательный шарнир или родительская группа.
-- `NodeKind::Mesh3D(Mesh3D)` — трехмерная полигональная сетка.
-- `NodeKind::Surface2D(Surface2D)` — плоская прямоугольная панель в экранных координатах.
-- `NodeKind::Text2D(Text2D)` — экранный текстовый элемент.
-
-### Автономное поведение (`NodeBehavior`):
-Трейт для привязки логики симуляции к отдельным узлам:
-```rust
-pub trait NodeBehavior {
-    fn on_process(&mut self, node: &mut SpatialNode, ctx: &mut Context, dt: f32);
-}
-```
+- **Локальная трансформация:** `Transform` (положение, ориентация, масштаб).
+- **Мировая трансформация:** `GlobalTransform` (матрица $4 \times 4$).
+- **Иерархические связи:** компоненты `Parent(EntityId)` и `Children(Vec<EntityId>)`.
+- **Имя и видимость:** компоненты `Name(String)` и `Visible(bool)`.
+- **Автономное поведение (`NodeBehavior`):**
+  ```rust
+  pub trait NodeBehavior {
+      fn on_process(&mut self, entity: EntityId, world: &mut World, ctx: &mut Context, dt: f32);
+  }
+  ```
 
 ---
 
-## 4. Граф сцены (`Scene`)
+## 4. Граф сцены (`Scene`) и система иерархии (`update_hierarchy_system`)
 
-`Scene` управляет иерархией узлов, источниками света, камерой и циклами обновления:
+Структура `Scene` объединяет камеру, цвет очистки и поколенческий мир ECS:
 
-### Рекурсивный пересчет трансформаций:
-Метод `update_transforms()` обходит иерархию узлов сверху вниз:
+```rust
+pub struct Scene {
+    pub world: World,
+    pub camera: Camera,
+    pub clear_color: Color,
+}
+```
+
+### Иерархический пересчет трансформаций (`update_hierarchy_system`):
+Система обходит граф сцены в ширину (BFS), начиная с корневых узлов (`Parent == None`), гарантируя вычисление матриц родителей до детей без переполнения стека рекурсии:
 $$M_{\text{global}}(\text{child}) = M_{\text{global}}(\text{parent}) \times M_{\text{local}}(\text{child})$$
-Если узел не имеет родителя (`parent == None`), его глобальная матрица совпадает с локальной матрицей `transform.matrix()`.
 
 ### Спавн и привязка:
 ```rust
-let parent_id = scene.spawn_node("Anchor", NodeKind::Empty, Transform::from_xyz(0.0, 5.0, 0.0), None);
-let mesh_id = scene.spawn_mesh_3d(Mesh3D::cube(1.0), Transform::IDENTITY, Collider::box_3d(Vec3::ONE));
+let parent_id = scene.spawn_empty("Anchor", Transform::from_xyz(0.0, 5.0, 0.0));
+let mesh_id = scene.spawn_mesh_3d(Mesh3D::cube(1.0), Transform::IDENTITY, Some(Collider::box_3d(Vec3::ONE)));
 
 // Построение иерархии (parent-child)
 scene.attach_child(parent_id, mesh_id);
 ```
 
 ### Взаимодействие со сценой:
-- `scene.update(ctx, dt)` — пересчитывает мировые матрицы узлов и вызывает `on_process` для всех зарегистрированных поведений.
-- `scene.render(ctx)` — выполняет фазы отрисовки 3D мешей, 2D поверхностей и 2D текста.
-- `scene.despawn_node(id)` — удаляет узел и все его дочерние элементы, отсоединяя от родителя.
+- `scene.update(ctx, dt)` — выполняет иерархический пересчет мировых матриц, физическую симуляцию (включая OBB SAT и Broadphase) и вызывает `on_process` для всех зарегистрированных поведений.
+- `scene.render(ctx)` — выполняет фазы отрисовки 3D мешей, 2D поверхностей и батчированного 2D текста.
+- `scene.despawn_node(id)` — безопасно удаляет узел и все его дочерние элементы, освобождая занятые GPU-ресурсы через очередь очистки VRAM.
 - `scene.check_intersection(id_a, id_b)` — проверяет геометрическое перекрытие ограничивающих объемов узлов.
 - `scene.resolve_penetration(id_a, id_b, &contact)` — кинематически разделяет пересекающиеся узлы.
 - `scene.raycast(&ray)` — выполняет трассировку луча по всей сцене.

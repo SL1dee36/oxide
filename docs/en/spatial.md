@@ -53,64 +53,54 @@ pub enum Projection {
 
 ---
 
-## 3. Spatial Node (`SpatialNode`)
+---
 
-Entities in the scene graph are instances of `SpatialNode`:
+## 3. Node Identification and Components (`NodeId`, `Transform`)
 
-```rust
-pub struct SpatialNode {
-    pub id: NodeId,
-    pub name: String,
-    pub parent: Option<NodeId>,
-    pub children: Vec<NodeId>,
-    pub transform: Transform,
-    pub global_transform: Mat4,
-    pub kind: NodeKind,
-    pub collider: Option<Collider>,
-    pub visible: bool,
-    pub is_static: bool,
-    pub behavior: Option<Box<dyn NodeBehavior>>,
-}
-```
+In Oxide's modern ECS architecture, every scene node is an ECS entity ([`EntityId`](../ecs.md), with `NodeId = EntityId` provided as a backwards-compatible alias). Node properties are stored in sparse component tables:
 
-### Node Payloads (`NodeKind`):
-- `NodeKind::Empty` — Structural pivot, group anchor, or kinematic joint.
-- `NodeKind::Mesh3D(Mesh3D)` — 3D polygonal mesh geometry.
-- `NodeKind::Surface2D(Surface2D)` — Planar quad panel in screen coordinates.
-- `NodeKind::Text2D(Text2D)` — Screen-space typography element.
-
-### Procedural Behaviors (`NodeBehavior`):
-Trait for attaching per-frame logic to individual nodes:
-```rust
-pub trait NodeBehavior {
-    fn on_process(&mut self, node: &mut SpatialNode, ctx: &mut Context, dt: f32);
-}
-```
+- **Local Transform:** `Transform` (translation, rotation, scale).
+- **World Transform:** `GlobalTransform` ($4 \times 4$ affine matrix).
+- **Hierarchy Links:** `Parent(EntityId)` and `Children(Vec<EntityId>)` components.
+- **Identity & Visibility:** `Name(String)` and `Visible(bool)` components.
+- **Autonomous Behaviors (`NodeBehavior`):**
+  ```rust
+  pub trait NodeBehavior {
+      fn on_process(&mut self, entity: EntityId, world: &mut World, ctx: &mut Context, dt: f32);
+  }
+  ```
 
 ---
 
-## 4. Scene Graph (`Scene`)
+## 4. Scene Graph (`Scene`) and Hierarchy System (`update_hierarchy_system`)
 
-`Scene` coordinates node hierarchies, lighting parameters, active camera, and update passes:
+`Scene` encapsulates the active camera, viewport clear color, and the ECS world:
 
-### Cascading Transform Propagation:
-`update_transforms()` recursively traverses the hierarchy from root nodes:
+```rust
+pub struct Scene {
+    pub world: World,
+    pub camera: Camera,
+    pub clear_color: Color,
+}
+```
+
+### Cascading Transform Propagation (`update_hierarchy_system`):
+The hierarchy system performs a breadth-first traversal (BFS) starting from root nodes (`Parent == None`), guaranteeing parent matrices are evaluated prior to children without recursion overhead:
 $$M_{\text{global}}(\text{child}) = M_{\text{global}}(\text{parent}) \times M_{\text{local}}(\text{child})$$
-For root nodes (`parent == None`), the global matrix directly equals `transform.matrix()`.
 
 ### Spawning and Hierarchical Linking:
 ```rust
-let parent_id = scene.spawn_node("Anchor", NodeKind::Empty, Transform::from_xyz(0.0, 5.0, 0.0), None);
-let mesh_id = scene.spawn_mesh_3d(Mesh3D::cube(1.0), Transform::IDENTITY, Collider::box_3d(Vec3::ONE));
+let parent_id = scene.spawn_empty("Anchor", Transform::from_xyz(0.0, 5.0, 0.0));
+let mesh_id = scene.spawn_mesh_3d(Mesh3D::cube(1.0), Transform::IDENTITY, Some(Collider::box_3d(Vec3::ONE)));
 
 // Link parent-child relationship
 scene.attach_child(parent_id, mesh_id);
 ```
 
 ### Scene Operations:
-- `scene.update(ctx, dt)` — Updates world transform matrices and runs attached `NodeBehavior` callbacks.
-- `scene.render(ctx)` — Submits 3D mesh, 2D surface, and 2D text render passes.
-- `scene.despawn_node(id)` — Removes a node and all of its recursive children, cleanly detaching from its parent.
+- `scene.update(ctx, dt)` — Evaluates hierarchical world matrices, executes physics simulation (including OBB SAT and Broadphase), and invokes active `NodeBehavior` callbacks.
+- `scene.render(ctx)` — Submits 3D mesh, 2D surface, and batched 2D text render passes.
+- `scene.despawn_node(id)` — Removes a node and all recursive descendants, safely queuing GPU meshes into VRAM cleanup.
 - `scene.check_intersection(id_a, id_b)` — Evaluates geometric overlap between node colliders.
 - `scene.resolve_penetration(id_a, id_b, &contact)` — Kinematically separates intersecting nodes.
 - `scene.raycast(&ray)` — Performs closest-hit raycasting through all colliders in the scene.

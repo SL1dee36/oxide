@@ -58,10 +58,12 @@ sequenceDiagram
 | Модуль | Файл | Описание подсистемы |
 | :--- | :--- | :--- |
 | **`core`** | [`core.md`](core.md) | Жизненный цикл приложения (`App`), контекст выполнения (`Context`), тайминг (`Time`), опрос ввода (`InputState`), типизированные ошибки (`OxideError`). |
+| **`ecs`** | [`ecs.md`](ecs.md) | Поколенческий ECS (`World`), таблицы компонентов (`Transform`, `Visible`, `Collider`, `RigidBody`, `SoftBody`), отложенная очистка VRAM (`PendingGpuMeshCleanup`). |
+| **`physics`** | [`physics.md`](physics.md) | 6-DOF динамика твёрдых тел (`RigidBody`, тензоры инерции, импульсный солвер), XPBD-симуляция мягких тел и ткани (`SoftBody`). |
 | **`window`** | [`window.md`](window.md) | Создание системного окна, инициализация контекста OpenGL 4.5 Core (`WindowContext`), управление областью вывода (viewport). |
 | **`renderer`** | [`renderer.md`](renderer.md) | Конвейеры рендеринга (`Pipeline3D`, `Pipeline2D`), шейдерные программы (`ShaderProgram`), GPU-буферы (`VertexArray`, `VertexBuffer`, `IndexBuffer`), текстуры (`Texture2D`). |
-| **`spatial`** | [`spatial.md`](spatial.md) | Иерархический граф сцены (`Scene`, `SpatialNode`), пространственные трансформации (`Transform`), перспективная и ортографическая камеры (`Camera`). |
-| **`collision`** | [`collision.md`](collision.md) | Геометрические коллизии (`Collider`: Box3D, Sphere, Box2D), контактные манифолды (`ContactManifold`), трассировка лучей (`Ray3D`, `RaycastHit`). |
+| **`spatial`** | [`spatial.md`](spatial.md) | Иерархический граф сцены (`Scene`), пространственные трансформации (`Transform`), перспективная и ортографическая камеры (`Camera`). |
+| **`collision`** | [`collision.md`](collision.md) | Геометрические коллизии (`Collider`, `Obb3D`, SAT), широкая фаза (`BroadphaseGrid`), контактные манифолды (`ContactManifold`), рейкастинг (`Ray3D`, `RaycastHit`). |
 | **`assets`** | [`assets.md`](assets.md) | Полигональные меши в ОЗУ (`Mesh3D`), 2D-поверхности (`Surface2D`), процедурные генераторы (куб, сфера, плоскость), загрузка OBJ и изображений. |
 | **`text`** | [`text.md`](text.md) | Парсинг шрифтов TrueType/OpenType (`Font`), упаковка атласа глифов 1024x1024 (`FontAtlas`), текстовые элементы (`Text2D`), конвейер текста (`PipelineText`). |
 | **`math`** | [`math.md`](math.md) | Система координат, единицы измерения углов, векторы, матрицы 4x4 и кватернионы из библиотеки `glam`. |
