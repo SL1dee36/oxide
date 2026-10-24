@@ -1,5 +1,5 @@
 use crate::collision::collider::{
-    resolve_penetration_weighted, Aabb2D, Aabb3D, BoundingSphere, Collider,
+    resolve_penetration_weighted, Aabb2D, BoundingSphere, Collider, Obb3D,
 };
 use crate::collision::manifold::ContactManifold;
 use crate::collision::ray::{Ray3D, RaycastHit};
@@ -16,9 +16,9 @@ pub fn check_collider_intersection(
 ) -> Option<ContactManifold> {
     match (col_a, col_b) {
         (Collider::Box3D { half_extents: ha }, Collider::Box3D { half_extents: hb }) => {
-            let aabb_a = Aabb3D::from_center_half_extents(Vec3::ZERO, *ha).transform(mat_a);
-            let aabb_b = Aabb3D::from_center_half_extents(Vec3::ZERO, *hb).transform(mat_b);
-            aabb_a.contact(&aabb_b)
+            let obb_a = Obb3D::from_matrix(*ha, mat_a);
+            let obb_b = Obb3D::from_matrix(*hb, mat_b);
+            obb_a.contact(&obb_b)
         }
         (Collider::Sphere { radius: ra }, Collider::Sphere { radius: rb }) => {
             let pos_a = mat_a.transform_point3(Vec3::ZERO);
@@ -41,20 +41,20 @@ pub fn check_collider_intersection(
             aabb_a.contact(&aabb_b)
         }
         (Collider::Box3D { half_extents: h }, Collider::Sphere { radius: r }) => {
-            let aabb = Aabb3D::from_center_half_extents(Vec3::ZERO, *h).transform(mat_a);
+            let obb = Obb3D::from_matrix(*h, mat_a);
             let pos_sphere = mat_b.transform_point3(Vec3::ZERO);
             let (scale_b, _, _) = mat_b.to_scale_rotation_translation();
             let max_scale_b = scale_b.x.abs().max(scale_b.y.abs()).max(scale_b.z.abs());
             let sphere = BoundingSphere::new(pos_sphere, *r * max_scale_b);
-            aabb.contact_sphere(&sphere)
+            obb.contact_sphere(&sphere)
         }
         (Collider::Sphere { radius: r }, Collider::Box3D { half_extents: h }) => {
-            let aabb = Aabb3D::from_center_half_extents(Vec3::ZERO, *h).transform(mat_b);
+            let obb = Obb3D::from_matrix(*h, mat_b);
             let pos_sphere = mat_a.transform_point3(Vec3::ZERO);
             let (scale_a, _, _) = mat_a.to_scale_rotation_translation();
             let max_scale_a = scale_a.x.abs().max(scale_a.y.abs()).max(scale_a.z.abs());
             let sphere = BoundingSphere::new(pos_sphere, *r * max_scale_a);
-            if let Some(mut contact) = aabb.contact_sphere(&sphere) {
+            if let Some(mut contact) = obb.contact_sphere(&sphere) {
                 contact.normal = -contact.normal;
                 Some(contact)
             } else {
@@ -122,9 +122,8 @@ pub fn raycast_system(world: &World, ray: &Ray3D) -> Option<(EntityId, RaycastHi
         let mat = world.global_transform_matrix(entity);
         let hit = match collider {
             Collider::Box3D { half_extents } => {
-                let aabb =
-                    Aabb3D::from_center_half_extents(Vec3::ZERO, *half_extents).transform(&mat);
-                aabb.raycast(ray)
+                let obb = Obb3D::from_matrix(*half_extents, &mat);
+                obb.raycast(ray)
             }
             Collider::Sphere { radius } => {
                 let pos = mat.transform_point3(Vec3::ZERO);

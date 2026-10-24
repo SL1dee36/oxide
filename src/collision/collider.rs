@@ -1,7 +1,7 @@
 use crate::collision::manifold::ContactManifold;
 use crate::collision::ray::{Ray3D, RaycastHit};
 use crate::spatial::transform::Transform;
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat3, Mat4, Vec2, Vec3};
 
 /// Supported collision bounding volume primitives.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -313,6 +313,261 @@ impl Aabb3D {
         };
 
         Some(ContactManifold::new(normal, depth, closest))
+    }
+}
+
+/// 3D Oriented Bounding Box (OBB) defined by center, 3 orthonormal world-space axes, and scaled half-extents.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Obb3D {
+    /// Center of the box in world Cartesian coordinates.
+    pub center: Vec3,
+    /// Orthonormal local axes X, Y, Z in world space.
+    pub axes: [Vec3; 3],
+    /// Scaled half-extents along each local axis.
+    pub half_extents: Vec3,
+}
+
+impl Obb3D {
+    /// Constructs an OBB from unscaled half-extents and a world transformation matrix.
+    pub fn from_matrix(half_extents: Vec3, matrix: &Mat4) -> Self {
+        let (scale, rot, translation) = matrix.to_scale_rotation_translation();
+        let rot_mat = Mat3::from_quat(rot);
+        let axes = [
+            rot_mat.x_axis.normalize_or_zero(),
+            rot_mat.y_axis.normalize_or_zero(),
+            rot_mat.z_axis.normalize_or_zero(),
+        ];
+        Self {
+            center: translation,
+            axes,
+            half_extents: half_extents * scale.abs(),
+        }
+    }
+
+    /// Evaluates contact between this OBB and a bounding sphere.
+    pub fn contact_sphere(&self, sphere: &BoundingSphere) -> Option<ContactManifold> {
+        let d = sphere.center - self.center;
+        let local_p = Vec3::new(
+            d.dot(self.axes[0]),
+            d.dot(self.axes[1]),
+            d.dot(self.axes[2]),
+        );
+
+        let local_q = Vec3::new(
+            local_p.x.clamp(-self.half_extents.x, self.half_extents.x),
+            local_p.y.clamp(-self.half_extents.y, self.half_extents.y),
+            local_p.z.clamp(-self.half_extents.z, self.half_extents.z),
+        );
+
+        let world_q = self.center
+            + self.axes[0] * local_q.x
+            + self.axes[1] * local_q.y
+            + self.axes[2] * local_q.z;
+
+        let diff = sphere.center - world_q;
+        let dist_sq = diff.length_squared();
+
+        if dist_sq >= sphere.radius * sphere.radius {
+            return None;
+        }
+
+        let dist = dist_sq.sqrt();
+        let (normal, depth, contact_point) = if dist > 1e-5 {
+            (diff / dist, sphere.radius - dist, world_q)
+        } else {
+            // Sphere center is inside or on the boundary of the OBB
+            let d_min = (local_p + self.half_extents).abs();
+            let d_max = (self.half_extents - local_p).abs();
+
+            let mut min_dist = d_min.x;
+            let mut face_axis_idx = 0;
+            let mut face_sign = -1.0;
+
+            if d_max.x < min_dist {
+                min_dist = d_max.x;
+                face_axis_idx = 0;
+                face_sign = 1.0;
+            }
+            if d_min.y < min_dist {
+                min_dist = d_min.y;
+                face_axis_idx = 1;
+                face_sign = -1.0;
+            }
+            if d_max.y < min_dist {
+                min_dist = d_max.y;
+                face_axis_idx = 1;
+                face_sign = 1.0;
+            }
+            if d_min.z < min_dist {
+                min_dist = d_min.z;
+                face_axis_idx = 2;
+                face_sign = -1.0;
+            }
+            if d_max.z < min_dist {
+                min_dist = d_max.z;
+                face_axis_idx = 2;
+                face_sign = 1.0;
+            }
+
+            let normal = self.axes[face_axis_idx] * face_sign;
+            let depth = sphere.radius + min_dist;
+            let mut local_face_pt = local_q;
+            match face_axis_idx {
+                0 => local_face_pt.x = face_sign * self.half_extents.x,
+                1 => local_face_pt.y = face_sign * self.half_extents.y,
+                _ => local_face_pt.z = face_sign * self.half_extents.z,
+            }
+            let pt = self.center
+                + self.axes[0] * local_face_pt.x
+                + self.axes[1] * local_face_pt.y
+                + self.axes[2] * local_face_pt.z;
+            (normal, depth, pt)
+        };
+
+        Some(ContactManifold::new(normal, depth, contact_point))
+    }
+
+    /// Performs raycast against this OBB by transforming the ray into local space.
+    pub fn raycast(&self, ray: &Ray3D) -> Option<RaycastHit> {
+        let oc = ray.origin - self.center;
+        let local_origin = Vec3::new(
+            oc.dot(self.axes[0]),
+            oc.dot(self.axes[1]),
+            oc.dot(self.axes[2]),
+        );
+        let local_direction = Vec3::new(
+            ray.direction.dot(self.axes[0]),
+            ray.direction.dot(self.axes[1]),
+            ray.direction.dot(self.axes[2]),
+        );
+
+        let local_ray = Ray3D::new(local_origin, local_direction);
+        let local_aabb = Aabb3D::from_center_half_extents(Vec3::ZERO, self.half_extents);
+        let hit = local_aabb.raycast(&local_ray)?;
+
+        // Rotate normal back to world space
+        let world_normal = (self.axes[0] * hit.normal.x
+            + self.axes[1] * hit.normal.y
+            + self.axes[2] * hit.normal.z)
+            .normalize();
+
+        Some(RaycastHit {
+            distance: hit.distance,
+            point: ray.point_at(hit.distance),
+            normal: world_normal,
+        })
+    }
+
+    /// Computes contact manifold between two OBBs using Separating Axis Theorem (SAT).
+    pub fn contact(&self, other: &Self) -> Option<ContactManifold> {
+        let diff = other.center - self.center;
+
+        // 15 candidate axes: 3 from self, 3 from other, 9 cross products
+        let axes_to_test: [Vec3; 15] = [
+            self.axes[0],
+            self.axes[1],
+            self.axes[2],
+            other.axes[0],
+            other.axes[1],
+            other.axes[2],
+            self.axes[0].cross(other.axes[0]),
+            self.axes[0].cross(other.axes[1]),
+            self.axes[0].cross(other.axes[2]),
+            self.axes[1].cross(other.axes[0]),
+            self.axes[1].cross(other.axes[1]),
+            self.axes[1].cross(other.axes[2]),
+            self.axes[2].cross(other.axes[0]),
+            self.axes[2].cross(other.axes[1]),
+            self.axes[2].cross(other.axes[2]),
+        ];
+
+        let mut min_overlap = f32::INFINITY;
+        let mut best_axis = Vec3::Y;
+
+        for raw_axis in axes_to_test {
+            let len_sq = raw_axis.length_squared();
+            if len_sq < 1e-6 {
+                // Parallel / degenerate edge cross product
+                continue;
+            }
+            let axis = raw_axis / len_sq.sqrt();
+
+            let r_a = self.half_extents.x * self.axes[0].dot(axis).abs()
+                + self.half_extents.y * self.axes[1].dot(axis).abs()
+                + self.half_extents.z * self.axes[2].dot(axis).abs();
+
+            let r_b = other.half_extents.x * other.axes[0].dot(axis).abs()
+                + other.half_extents.y * other.axes[1].dot(axis).abs()
+                + other.half_extents.z * other.axes[2].dot(axis).abs();
+
+            let s = diff.dot(axis).abs();
+            let overlap = (r_a + r_b) - s;
+
+            if overlap <= 0.0 {
+                // Separating axis found
+                return None;
+            }
+
+            if overlap < min_overlap {
+                min_overlap = overlap;
+                let oriented_axis = if diff.dot(axis) < 0.0 { -axis } else { axis };
+                best_axis = oriented_axis;
+            }
+        }
+
+        if min_overlap.is_infinite() {
+            return None;
+        }
+
+        let r_a_best = self.half_extents.x * self.axes[0].dot(best_axis).abs()
+            + self.half_extents.y * self.axes[1].dot(best_axis).abs()
+            + self.half_extents.z * self.axes[2].dot(best_axis).abs();
+
+        let p_n = self.center.dot(best_axis) + r_a_best - min_overlap * 0.5;
+
+        // Two orthonormal tangent axes in the plane perpendicular to best_axis
+        let t1 = if best_axis.x.abs() > 0.9 {
+            best_axis.cross(Vec3::Y).normalize()
+        } else {
+            best_axis.cross(Vec3::X).normalize()
+        };
+        let t2 = best_axis.cross(t1).normalize();
+
+        // Project both OBBs onto t1
+        let r_a_1 = self.half_extents.x * self.axes[0].dot(t1).abs()
+            + self.half_extents.y * self.axes[1].dot(t1).abs()
+            + self.half_extents.z * self.axes[2].dot(t1).abs();
+        let r_b_1 = other.half_extents.x * other.axes[0].dot(t1).abs()
+            + other.half_extents.y * other.axes[1].dot(t1).abs()
+            + other.half_extents.z * other.axes[2].dot(t1).abs();
+        let min_a_1 = self.center.dot(t1) - r_a_1;
+        let max_a_1 = self.center.dot(t1) + r_a_1;
+        let min_b_1 = other.center.dot(t1) - r_b_1;
+        let max_b_1 = other.center.dot(t1) + r_b_1;
+        let p_1 = (min_a_1.max(min_b_1) + max_a_1.min(max_b_1)) * 0.5;
+
+        // Project both OBBs onto t2
+        let r_a_2 = self.half_extents.x * self.axes[0].dot(t2).abs()
+            + self.half_extents.y * self.axes[1].dot(t2).abs()
+            + self.half_extents.z * self.axes[2].dot(t2).abs();
+        let r_b_2 = other.half_extents.x * other.axes[0].dot(t2).abs()
+            + other.half_extents.y * other.axes[1].dot(t2).abs()
+            + other.half_extents.z * other.axes[2].dot(t2).abs();
+        let min_a_2 = self.center.dot(t2) - r_a_2;
+        let max_a_2 = self.center.dot(t2) + r_a_2;
+        let min_b_2 = other.center.dot(t2) - r_b_2;
+        let max_b_2 = other.center.dot(t2) + r_b_2;
+        let p_2 = (min_a_2.max(min_b_2) + max_a_2.min(max_b_2)) * 0.5;
+
+        let contact_point = best_axis * p_n + t1 * p_1 + t2 * p_2;
+
+        Some(ContactManifold::new(best_axis, min_overlap, contact_point))
+    }
+
+    /// Evaluates whether this OBB intersects with `other`.
+    #[inline]
+    pub fn intersects(&self, other: &Self) -> bool {
+        self.contact(other).is_some()
     }
 }
 
