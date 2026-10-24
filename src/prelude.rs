@@ -5,7 +5,7 @@ pub use crate::assets::{
 pub use crate::collision::{
     check_collider_intersection, check_entity_intersection, raycast_system, resolve_penetration,
     resolve_penetration_system, resolve_penetration_weighted, Aabb2D, Aabb3D, BoundingSphere,
-    Collider, ContactManifold, Obb3D, Ray3D, RaycastHit,
+    BroadphaseGrid, BroadphasePair, Collider, ContactManifold, Obb3D, Ray3D, RaycastHit,
 };
 pub use crate::core::{
     App, AppBuilder, AppHandler, Color, Context, InputState, KeyCode, MouseButton, OxideError,

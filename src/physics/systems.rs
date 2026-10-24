@@ -1,3 +1,4 @@
+use crate::collision::broadphase::BroadphaseGrid;
 use crate::collision::collider::resolve_penetration_weighted;
 use crate::collision::systems::check_collider_intersection;
 use crate::ecs::entity::EntityId;
@@ -89,42 +90,41 @@ pub fn step_rigid_body_system(world: &mut World, dt: f32, config: &PhysicsConfig
     // Update global transform matrices before collision testing
     update_hierarchy_system(world);
 
-    // Phase 3: Collision detection (narrowphase) & collection of contacts
-    let collider_entities: Vec<EntityId> = world
-        .collider
-        .keys()
-        .filter(|&e| world.is_alive(e))
-        .collect();
+    // Phase 3: Collision detection (broadphase & narrowphase) & collection of contacts
+    let mut broadphase = BroadphaseGrid::new();
+    broadphase.reserve(world.collider.len());
 
+    for (entity, collider) in &world.collider {
+        if !world.is_alive(entity) {
+            continue;
+        }
+        let is_static = world.rigid_body.get(entity).is_none_or(|rb| !rb.is_dynamic());
+        let mat = world.global_transform_matrix(entity);
+        let aabb = collider.world_aabb(&mat);
+        broadphase.push(entity, aabb, is_static);
+    }
+
+    let pairs = broadphase.compute_pairs();
     let mut contacts = Vec::new();
 
-    for i in 0..collider_entities.len() {
-        for j in (i + 1)..collider_entities.len() {
-            let a = collider_entities[i];
-            let b = collider_entities[j];
+    for pair in pairs {
+        let a = pair.a;
+        let b = pair.b;
 
-            // Prune pairs where both bodies are non-dynamic obstacles
-            let is_static_a = world.rigid_body.get(a).is_none_or(|rb| !rb.is_dynamic());
-            let is_static_b = world.rigid_body.get(b).is_none_or(|rb| !rb.is_dynamic());
-            if is_static_a && is_static_b {
-                continue;
-            }
+        let col_a = match world.collider.get(a) {
+            Some(c) => *c,
+            None => continue,
+        };
+        let col_b = match world.collider.get(b) {
+            Some(c) => *c,
+            None => continue,
+        };
 
-            let col_a = match world.collider.get(a) {
-                Some(c) => *c,
-                None => continue,
-            };
-            let col_b = match world.collider.get(b) {
-                Some(c) => *c,
-                None => continue,
-            };
+        let mat_a = world.global_transform_matrix(a);
+        let mat_b = world.global_transform_matrix(b);
 
-            let mat_a = world.global_transform_matrix(a);
-            let mat_b = world.global_transform_matrix(b);
-
-            if let Some(contact) = check_collider_intersection(&col_a, &mat_a, &col_b, &mat_b) {
-                contacts.push((a, b, contact));
-            }
+        if let Some(contact) = check_collider_intersection(&col_a, &mat_a, &col_b, &mat_b) {
+            contacts.push((a, b, contact));
         }
     }
 
