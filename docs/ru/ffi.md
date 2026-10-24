@@ -49,6 +49,11 @@ flowchart TD
 - Передается по указателю в функции обратного вызова `on_init`, `on_update`, `on_render`.
 - Является временной ссылкой на стек Rust-рантайма. **Запрещено сохранять указатель `OxideContext`** для использования вне тела обратного вызова.
 
+### 1.4. Защита от паник и обработка ошибок:
+- **Макрос `ffi_boundary!`:** Проброс Rust `panic!` через границу `extern "C"` является неопределённым поведением (Undefined Behavior). Все FFI-функции Oxide защищены макросом `ffi_boundary!`, который перехватывает паники с помощью `std::panic::catch_unwind` и возвращает безопасные значения по умолчанию (дефолтные указатели, `false`, `0` или `OXIDE_INVALID_NODE_ID`).
+- **Идентификатор ошибки узла `OXIDE_INVALID_NODE_ID`:** Константа `UINT64_MAX` (`0xFFFFFFFFFFFFFFFF`, в Python `(1 << 64) - 1`) возвращается функциями создания сущностей (`oxide_scene_spawn_*`) в случае передачи невалидного указателя сцены или внутренней ошибки.
+- **Статус выполнения операций:** Функции `oxide_scene_update`, `oxide_scene_render` и `oxide_scene_step_physics` возвращают `bool` (`true` при успешном выполнении, `false` при невалидном указателе или перехваченной панике).
+
 ---
 
 ## 2. Разработка на Python (`bindings/python/oxide.py`)
@@ -179,4 +184,57 @@ cmake --build build --config Release
 cd examples/c_app
 make
 ./c_app
+```
+
+---
+
+## 5. Физический C ABI и симуляция
+
+Oxide предоставляет полный набор функций для работы с 6-DOF твердыми телами и XPBD-тканями через C ABI:
+
+```c
+// Спавн твердого тела в форме параллелепипеда
+uint64_t oxide_scene_spawn_rigid_body_box(
+    OxideScene* scene,
+    OxideVec3 half_extents,
+    float mass,
+    OxideRigidBodyType body_type,
+    OxideTransform transform
+);
+
+// Спавн твердого тела в форме сферы
+uint64_t oxide_scene_spawn_rigid_body_sphere(
+    OxideScene* scene,
+    float radius,
+    float mass,
+    OxideRigidBodyType body_type,
+    OxideTransform transform
+);
+
+// Воздействие силами и импульсами
+void oxide_scene_rigid_body_apply_force(OxideScene* scene, uint64_t node, OxideVec3 force);
+void oxide_scene_rigid_body_apply_torque(OxideScene* scene, uint64_t node, OxideVec3 torque);
+void oxide_scene_rigid_body_apply_impulse(OxideScene* scene, uint64_t node, OxideVec3 impulse);
+
+// Линейная и угловая скорость
+void oxide_scene_rigid_body_set_velocity(OxideScene* scene, uint64_t node, OxideVec3 velocity);
+bool oxide_scene_rigid_body_get_velocity(const OxideScene* scene, uint64_t node, OxideVec3* out_velocity);
+void oxide_scene_rigid_body_set_angular_velocity(OxideScene* scene, uint64_t node, OxideVec3 angular_velocity);
+bool oxide_scene_rigid_body_get_angular_velocity(const OxideScene* scene, uint64_t node, OxideVec3* out_angular_velocity);
+
+// Шаг физической симуляции (автоматически вызывается внутри oxide_scene_update)
+bool oxide_scene_step_physics(OxideScene* scene, float dt);
+
+// XPBD-ткань
+uint64_t oxide_scene_spawn_cloth_grid(
+    OxideScene* scene,
+    float width,
+    float height,
+    uint32_t cols,
+    uint32_t rows,
+    float mass_per_particle,
+    float compliance,
+    OxideTransform transform
+);
+void oxide_scene_soft_body_pin_particle(OxideScene* scene, uint64_t node, uint32_t particle_index);
 ```

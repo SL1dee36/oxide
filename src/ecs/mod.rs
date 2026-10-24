@@ -1,6 +1,6 @@
 //! Entity-Component-System (ECS) architecture.
 //!
-//! Provides a data-oriented [`World`] storing decoupled components in generational [`slotmap`] tables.
+//! Provides a data-oriented [`World`](crate::ecs::World) storing decoupled components in generational [`slotmap`] tables.
 
 pub mod components;
 pub mod entity;

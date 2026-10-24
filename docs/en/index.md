@@ -58,10 +58,12 @@ sequenceDiagram
 | Module | File | Subsystem Description |
 | :--- | :--- | :--- |
 | **`core`** | [`core.md`](core.md) | Application lifecycle (`App`), execution context (`Context`), timing (`Time`), input polling (`InputState`), typed errors (`OxideError`). |
+| **`ecs`** | [`ecs.md`](ecs.md) | Generational ECS (`World`), component storage tables (`Transform`, `Visible`, `Collider`, `RigidBody`, `SoftBody`), deferred VRAM cleanup (`PendingGpuMeshCleanup`). |
+| **`physics`** | [`physics.md`](physics.md) | 6-DOF rigid body dynamics (`RigidBody`, inertia tensors, impulse solver), XPBD soft body and cloth simulation (`SoftBody`). |
 | **`window`** | [`window.md`](window.md) | OS window initialization, OpenGL 4.5 Core context binding (`WindowContext`), viewport configuration. |
 | **`renderer`** | [`renderer.md`](renderer.md) | Graphics pipelines (`Pipeline3D`, `Pipeline2D`), GLSL shader programs (`ShaderProgram`), GPU buffers (`VertexArray`, `VertexBuffer`, `IndexBuffer`), textures (`Texture2D`). |
-| **`spatial`** | [`spatial.md`](spatial.md) | Hierarchical scene graph (`Scene`, `SpatialNode`), spatial transforms (`Transform`), perspective and orthographic camera models (`Camera`). |
-| **`collision`** | [`collision.md`](collision.md) | Geometric collision detection (`Collider`: Box3D, Sphere, Box2D), contact manifolds (`ContactManifold`), raycasting (`Ray3D`, `RaycastHit`). |
+| **`spatial`** | [`spatial.md`](spatial.md) | Hierarchical scene graph (`Scene`), spatial transforms (`Transform`), perspective and orthographic camera models (`Camera`). |
+| **`collision`** | [`collision.md`](collision.md) | Geometric collision detection (`Collider`, `Obb3D`, SAT), broadphase culling (`BroadphaseGrid`), contact manifolds (`ContactManifold`), raycasting (`Ray3D`, `RaycastHit`). |
 | **`assets`** | [`assets.md`](assets.md) | RAM polygonal geometry (`Mesh3D`), 2D surfaces (`Surface2D`), procedural primitive generators, Wavefront OBJ and image loaders. |
 | **`text`** | [`text.md`](text.md) | TrueType/OpenType font parsing (`Font`), 1024x1024 glyph atlas generation (`FontAtlas`), text elements (`Text2D`), text rendering pipeline (`PipelineText`). |
 | **`math`** | [`math.md`](math.md) | Coordinate systems, angular units, vector, matrix, and quaternion re-exports from `glam`. |

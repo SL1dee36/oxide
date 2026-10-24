@@ -49,6 +49,11 @@ flowchart TD
 - Passed by raw pointer to `on_init`, `on_update`, and `on_render` callbacks.
 - Represents a transient stack reference within the frame loop. **Storing or accessing an `OxideContext` pointer outside the scope of the callback is strictly invalid**.
 
+### 1.4. Panic Safety and Error Handling:
+- **`ffi_boundary!` Macro:** Unwinding a Rust `panic!` across an `extern "C"` boundary is Undefined Behavior. All Oxide C FFI entry points are guarded by `ffi_boundary!`, which intercepts panics via `std::panic::catch_unwind` and returns safe defaults (`false`, `null`, `0`, or `OXIDE_INVALID_NODE_ID`).
+- **Invalid Node Identifier `OXIDE_INVALID_NODE_ID`:** Constant `UINT64_MAX` (`0xFFFFFFFFFFFFFFFF`, in Python `(1 << 64) - 1`) is returned by node creation routines (`oxide_scene_spawn_*`) upon null pointers or runtime failures.
+- **Operation Status Returns:** `oxide_scene_update`, `oxide_scene_render`, and `oxide_scene_step_physics` return `bool` (`true` on success, `false` on invalid handle or caught panic).
+
 ---
 
 ## 2. Python Integration (`bindings/python/oxide.py`)
@@ -179,4 +184,57 @@ cmake --build build --config Release
 cd examples/c_app
 make
 ./c_app
+```
+
+---
+
+## 5. Physics C ABI and Simulation
+
+Oxide exports a complete suite of C ABI functions for 6-DOF rigid bodies and XPBD soft body cloth simulations:
+
+```c
+// Spawn rigid body box
+uint64_t oxide_scene_spawn_rigid_body_box(
+    OxideScene* scene,
+    OxideVec3 half_extents,
+    float mass,
+    OxideRigidBodyType body_type,
+    OxideTransform transform
+);
+
+// Spawn rigid body sphere
+uint64_t oxide_scene_spawn_rigid_body_sphere(
+    OxideScene* scene,
+    float radius,
+    float mass,
+    OxideRigidBodyType body_type,
+    OxideTransform transform
+);
+
+// Force and impulse application
+void oxide_scene_rigid_body_apply_force(OxideScene* scene, uint64_t node, OxideVec3 force);
+void oxide_scene_rigid_body_apply_torque(OxideScene* scene, uint64_t node, OxideVec3 torque);
+void oxide_scene_rigid_body_apply_impulse(OxideScene* scene, uint64_t node, OxideVec3 impulse);
+
+// Linear and angular velocity
+void oxide_scene_rigid_body_set_velocity(OxideScene* scene, uint64_t node, OxideVec3 velocity);
+bool oxide_scene_rigid_body_get_velocity(const OxideScene* scene, uint64_t node, OxideVec3* out_velocity);
+void oxide_scene_rigid_body_set_angular_velocity(OxideScene* scene, uint64_t node, OxideVec3 angular_velocity);
+bool oxide_scene_rigid_body_get_angular_velocity(const OxideScene* scene, uint64_t node, OxideVec3* out_angular_velocity);
+
+// Physics step invocation (also automatically performed within oxide_scene_update)
+bool oxide_scene_step_physics(OxideScene* scene, float dt);
+
+// XPBD Cloth
+uint64_t oxide_scene_spawn_cloth_grid(
+    OxideScene* scene,
+    float width,
+    float height,
+    uint32_t cols,
+    uint32_t rows,
+    float mass_per_particle,
+    float compliance,
+    OxideTransform transform
+);
+void oxide_scene_soft_body_pin_particle(OxideScene* scene, uint64_t node, uint32_t particle_index);
 ```

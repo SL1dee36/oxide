@@ -16,6 +16,7 @@ pub struct Mesh3D {
     pub indices: Vec<u32>,
     pub color: Color,
     pub emissive: Color,
+    pub texture: Option<Arc<Texture2D>>,
     pub vao: Option<VertexArray>,
     pub vbo: Option<VertexBuffer>,
     pub ebo: Option<IndexBuffer>,
@@ -27,22 +28,26 @@ pub struct Mesh3D {
 - `Mesh3D::plane(width: f32, depth: f32) -> Self` — Generates a horizontal quad in the XZ plane (normal `[0.0, 1.0, 0.0]`) with 4 vertices and 6 indices.
 - `Mesh3D::sphere(radius: f32, rings: u32, sectors: u32) -> Self` — Generates a parametric UV sphere with configurable latitude rings and longitude sectors.
 
-### GPU Buffer Allocation:
+### GPU Buffer Allocation & Resource Management:
 ```rust
 pub fn ensure_gpu_buffers(&mut self, gl: &glow::Context) -> Result<(), OxideError>;
 ```
 Verifies whether `self.vao` is present. If unallocated, it creates `VertexArray`, `VertexBuffer`, and `IndexBuffer`, binds vertex attributes via `Pipeline3D::setup_vertex_attributes`, and stores the buffer handles.
 
+#### Safe VRAM Deallocation (VRAM Cleanup):
+When a mesh entity is destroyed via `world.despawn(entity)` or `world.despawn_recursive(entity)`, its GPU buffers (`vao`, `vbo`, `ebo`) are not leaked in VRAM. They are queued into `world.pending_gpu_cleanup` (`PendingGpuMeshCleanup`). At the beginning of each frame, `RenderSystem::render_world` drains this queue and invokes `destroy(gl)` on all released GPU resources.
+
 ---
 
 ## 2. Planar 2D Surfaces (`Surface2D`)
 
-`Surface2D` specifies pixel dimensions and fill color for a planar screen quad without allocating dedicated meshes, since `Pipeline2D` reuses a persistent unit quad:
+`Surface2D` specifies pixel dimensions, fill color, and an optional texture for a planar screen quad without allocating dedicated meshes, since `Pipeline2D` reuses a persistent unit quad:
 
 ```rust
 pub struct Surface2D {
     pub size: glam::Vec2,
     pub color: Color,
+    pub texture: Option<Arc<Texture2D>>,
 }
 ```
 
@@ -75,9 +80,11 @@ pub fn load_texture_file(gl: &glow::Context, path: impl AsRef<Path>) -> Result<T
 ## 4. Pipeline Submission Stages
 
 ### Submitting a 3D Mesh to `Pipeline3D`:
-1. Load model geometry into host RAM:
+1. Load model geometry into host RAM and texture into GPU memory:
    ```rust
    let mut mesh = load_obj_file("assets/models/component.obj")?;
+   let texture = Arc::new(load_texture_file(ctx.gl, "assets/textures/diffuse.png")?);
+   mesh.texture = Some(texture);
    ```
 2. Allocate GPU buffers with the active OpenGL context:
    ```rust
@@ -86,14 +93,16 @@ pub fn load_texture_file(gl: &glow::Context, path: impl AsRef<Path>) -> Result<T
 3. Issue pipeline draw call:
    ```rust
    if let (Some(vao), Some(ebo)) = (&mesh.vao, &mesh.ebo) {
-       pipeline_3d.draw(ctx.gl, &model_matrix, mesh.color, mesh.emissive, None, vao, ebo);
+       pipeline_3d.draw(ctx.gl, &model_matrix, mesh.color, mesh.emissive, mesh.texture.as_deref(), vao, ebo);
    }
    ```
+   *(When rendering a scene, `RenderSystem::render_world` automatically calls `ensure_gpu_buffers` and forwards `mesh.texture.as_deref()` to `pipeline_3d.draw`).*
 
 ### Submitting a 2D Surface to `Pipeline2D`:
-1. Define surface dimensions and color:
+1. Define surface dimensions, color, and optional texture:
    ```rust
-   let surface = Surface2D::from_color(Vec2::new(300.0, 80.0), Color::rgba(0.1, 0.15, 0.25, 0.9));
+   let mut surface = Surface2D::from_color(Vec2::new(300.0, 80.0), Color::rgba(0.1, 0.15, 0.25, 0.9));
+   surface.texture = Some(my_texture);
    ```
 2. Build 2D transformation matrix:
    ```rust
@@ -105,5 +114,5 @@ pub fn load_texture_file(gl: &glow::Context, path: impl AsRef<Path>) -> Result<T
    ```
 3. Issue pipeline draw call:
    ```rust
-   pipeline_2d.draw(ctx.gl, &model_2d, surface.color, None);
+   pipeline_2d.draw(ctx.gl, &model_2d, surface.color, surface.texture.as_deref());
    ```
