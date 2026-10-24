@@ -161,7 +161,7 @@ fn test_ffi_physics_lifecycle() {
             0.3,  // friction
             false // dynamic
         );
-        assert_ne!(node_id, 0);
+        assert_ne!(node_id, u64::MAX);
 
         let mut vel = OxideVec3 { x: 0.0, y: 0.0, z: 0.0 };
         assert!(oxide_scene_rigid_body_get_velocity(scene, node_id, &mut vel));
@@ -251,7 +251,7 @@ fn test_ffi_soft_body_particle_manipulation() {
                 scale: OxideVec3 { x: 1.0, y: 1.0, z: 1.0 },
             },
         );
-        assert_ne!(cloth_id, 0);
+        assert_ne!(cloth_id, u64::MAX);
 
         let mut particle_count: u32 = 0;
         assert!(oxide_scene_soft_body_get_particle_count(scene, cloth_id, &mut particle_count));

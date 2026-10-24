@@ -30,6 +30,29 @@ use crate::core::input::{KeyCode, MouseButton};
 use glam::{Quat, Vec2, Vec3};
 use std::ffi::{c_char, c_void, CStr};
 
+/// Sentinel invalid node identifier indicating failure in C FFI node creation.
+pub const OXIDE_INVALID_NODE_ID: u64 = u64::MAX;
+
+/// Internal helper macro protecting external `extern "C"` ABI functions from unwinding across FFI boundary.
+macro_rules! ffi_boundary {
+    ($fallback:expr, $body:expr) => {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $body)) {
+            Ok(val) => val,
+            Err(payload) => {
+                let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                    *s
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    s.as_str()
+                } else {
+                    "unknown panic"
+                };
+                log::error!("FFI panic caught across C ABI boundary: {}", msg);
+                $fallback
+            }
+        }
+    };
+}
+
 /// C-compatible 2D vector.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -284,22 +307,24 @@ pub unsafe extern "C" fn oxide_app_run(
     app: *mut OxideApp,
     callbacks: OxideCallbacks,
 ) -> i32 {
-    if app.is_null() {
-        return -1;
-    }
+    ffi_boundary!(-3, {
+        if app.is_null() {
+            return -1;
+        }
 
-    let app_box = Box::from_raw(app);
-    let handler = FfiAppHandler { callbacks };
+        let app_box = Box::from_raw(app);
+        let handler = FfiAppHandler { callbacks };
 
-    let res = App::build()
-        .with_title(app_box.title)
-        .with_size(app_box.width, app_box.height)
-        .run(handler);
+        let res = App::build()
+            .with_title(app_box.title)
+            .with_size(app_box.width, app_box.height)
+            .run(handler);
 
-    match res {
-        Ok(_) => 0,
-        Err(_) => -2,
-    }
+        match res {
+            Ok(_) => 0,
+            Err(_) => -2,
+        }
+    })
 }
 
 // ==========================================
@@ -640,7 +665,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_cube_3d(
         );
         id.to_ffi()
     } else {
-        u64::MAX
+        OXIDE_INVALID_NODE_ID
     }
 }
 
@@ -659,7 +684,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_sphere_3d(
         );
         id.to_ffi()
     } else {
-        u64::MAX
+        OXIDE_INVALID_NODE_ID
     }
 }
 
@@ -679,7 +704,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_surface_2d(
         );
         id.to_ffi()
     } else {
-        u64::MAX
+        OXIDE_INVALID_NODE_ID
     }
 }
 
@@ -707,7 +732,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_text_2d(
         );
         id.to_ffi()
     } else {
-        u64::MAX
+        OXIDE_INVALID_NODE_ID
     }
 }
 
@@ -786,7 +811,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_cube_3d_colored(
         );
         id.to_ffi()
     } else {
-        u64::MAX
+        OXIDE_INVALID_NODE_ID
     }
 }
 
@@ -803,7 +828,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_sphere_3d_colored(
         let id = s.world.spawn_mesh_3d(mesh, transform.into(), Collider::sphere(radius));
         id.to_ffi()
     } else {
-        u64::MAX
+        OXIDE_INVALID_NODE_ID
     }
 }
 
@@ -835,7 +860,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_box_3d(
         };
         id.to_ffi()
     } else {
-        u64::MAX
+        OXIDE_INVALID_NODE_ID
     }
 }
 
@@ -1112,25 +1137,27 @@ pub unsafe extern "C" fn oxide_scene_raycast(
     direction: OxideVec3,
     out_hit: *mut OxideRaycastHit,
 ) -> bool {
-    if let Some(s) = scene.as_mut() {
-        let dir: Vec3 = direction.into();
-        if dir.length_squared() > 1e-6 {
-            let ray = Ray3D::new(origin.into(), dir);
-            s.world.update_transforms();
-            if let Some((hit_entity, hit)) = s.world.raycast(&ray) {
-                if !out_hit.is_null() {
-                    *out_hit = OxideRaycastHit {
-                        node_id: hit_entity.to_ffi(),
-                        distance: hit.distance,
-                        point: hit.point.into(),
-                        normal: hit.normal.into(),
-                    };
+    ffi_boundary!(false, {
+        if let Some(s) = scene.as_mut() {
+            let dir: Vec3 = direction.into();
+            if dir.length_squared() > 1e-6 {
+                let ray = Ray3D::new(origin.into(), dir);
+                s.world.update_transforms();
+                if let Some((hit_entity, hit)) = s.world.raycast(&ray) {
+                    if !out_hit.is_null() {
+                        *out_hit = OxideRaycastHit {
+                            node_id: hit_entity.to_ffi(),
+                            distance: hit.distance,
+                            point: hit.point.into(),
+                            normal: hit.normal.into(),
+                        };
+                    }
+                    return true;
                 }
-                return true;
             }
         }
-    }
-    false
+        false
+    })
 }
 
 /// Evaluates geometric intersection between colliders of `node_a` and `node_b`.
@@ -1178,10 +1205,15 @@ pub unsafe extern "C" fn oxide_scene_update(
     scene: *mut OxideScene,
     ctx: *mut OxideContext,
     dt: f32,
-) {
-    if let (Some(s), Some(c)) = (scene.as_mut(), ctx.as_mut().and_then(|x| x.ctx.as_mut())) {
-        s.world.update(c, dt);
-    }
+) -> bool {
+    ffi_boundary!(false, {
+        if let (Some(s), Some(c)) = (scene.as_mut(), ctx.as_mut().and_then(|x| x.ctx.as_mut())) {
+            s.world.update(c, dt);
+            true
+        } else {
+            false
+        }
+    })
 }
 
 /// Renders the scene graph (3D passes, 2D planar passes, and typography overlay).
@@ -1189,10 +1221,15 @@ pub unsafe extern "C" fn oxide_scene_update(
 pub unsafe extern "C" fn oxide_scene_render(
     scene: *mut OxideScene,
     ctx: *mut OxideContext,
-) {
-    if let (Some(s), Some(c)) = (scene.as_mut(), ctx.as_mut().and_then(|x| x.ctx.as_mut())) {
-        s.render_system.render_world(c, &mut s.world);
-    }
+) -> bool {
+    ffi_boundary!(false, {
+        if let (Some(s), Some(c)) = (scene.as_mut(), ctx.as_mut().and_then(|x| x.ctx.as_mut())) {
+            s.render_system.render_world(c, &mut s.world);
+            true
+        } else {
+            false
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1204,10 +1241,15 @@ pub unsafe extern "C" fn oxide_scene_render(
 pub unsafe extern "C" fn oxide_scene_step_physics(
     scene: *mut OxideScene,
     dt: f32,
-) {
-    if let Some(s) = scene.as_mut() {
-        s.world.step_physics(dt);
-    }
+) -> bool {
+    ffi_boundary!(false, {
+        if let Some(s) = scene.as_mut() {
+            s.world.step_physics(dt);
+            true
+        } else {
+            false
+        }
+    })
 }
 
 /// Spawns a box mesh node with an attached rigid body and collider.
@@ -1236,7 +1278,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_rigid_body_box(
         let entity = s.world.spawn_rigid_body_with_mesh(mesh, transform.into(), collider, rb);
         return entity.to_ffi();
     }
-    0
+    OXIDE_INVALID_NODE_ID
 }
 
 /// Spawns a spherical mesh node with an attached rigid body and collider.
@@ -1264,7 +1306,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_rigid_body_sphere(
         let entity = s.world.spawn_rigid_body_with_mesh(mesh, transform.into(), collider, rb);
         return entity.to_ffi();
     }
-    0
+    OXIDE_INVALID_NODE_ID
 }
 
 /// Attaches a [`RigidBody`] component to an existing entity node.
@@ -1457,7 +1499,7 @@ pub unsafe extern "C" fn oxide_scene_spawn_soft_body_cloth(
         );
         return entity.to_ffi();
     }
-    0
+    OXIDE_INVALID_NODE_ID
 }
 
 /// Attaches a cloth soft body simulation component to an existing mesh entity.
