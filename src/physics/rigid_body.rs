@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::{Mat3, Quat, Vec3};
 
 /// Classifies physical motion simulation mode of a rigid body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -27,6 +27,8 @@ pub struct RigidBody {
     pub mass: f32,
     /// Inverse mass ($1 / m$), 0.0 for static or infinite mass bodies.
     pub inv_mass: f32,
+    /// Inverse inertia tensor in body local Cartesian coordinates.
+    pub inv_inertia_local: Mat3,
     /// Coefficient of restitution (bounciness) in [0.0, 1.0].
     pub restitution: f32,
     /// Coulomb surface friction coefficient in [0.0, 1.0].
@@ -49,16 +51,18 @@ impl RigidBody {
         }
     }
 
-    /// Constructs a dynamic rigid body with given mass in kilograms.
+    /// Constructs a dynamic rigid body with given mass in kilograms and isotropic unit sphere inertia tensor.
     pub fn new_dynamic(mass: f32) -> Self {
         let safe_mass = mass.max(1e-5);
+        let inv_mass = 1.0 / safe_mass;
         Self {
             velocity: Vec3::ZERO,
             angular_velocity: Vec3::ZERO,
             force_accumulator: Vec3::ZERO,
             torque_accumulator: Vec3::ZERO,
             mass: safe_mass,
-            inv_mass: 1.0 / safe_mass,
+            inv_mass,
+            inv_inertia_local: Mat3::from_diagonal(Vec3::splat(inv_mass * 2.5)),
             restitution: 0.2,
             friction: 0.5,
             body_type: RigidBodyType::Dynamic,
@@ -67,7 +71,7 @@ impl RigidBody {
         }
     }
 
-    /// Constructs an immobile static rigid body with zero inverse mass.
+    /// Constructs an immobile static rigid body with zero inverse mass and zero inertia tensor.
     pub fn new_static() -> Self {
         Self {
             velocity: Vec3::ZERO,
@@ -76,6 +80,7 @@ impl RigidBody {
             torque_accumulator: Vec3::ZERO,
             mass: 0.0,
             inv_mass: 0.0,
+            inv_inertia_local: Mat3::ZERO,
             restitution: 0.2,
             friction: 0.5,
             body_type: RigidBodyType::Static,
@@ -93,11 +98,71 @@ impl RigidBody {
             torque_accumulator: Vec3::ZERO,
             mass: 0.0,
             inv_mass: 0.0,
+            inv_inertia_local: Mat3::ZERO,
             restitution: 0.2,
             friction: 0.5,
             body_type: RigidBodyType::Kinematic,
             linear_damping: 0.0,
             angular_damping: 0.0,
+        }
+    }
+
+    /// Calculates and configures the inverse inertia tensor for a solid cuboid of dimensions `(width, height, depth)`.
+    ///
+    /// Principle moments: $I_{xx} = \frac{1}{12} m (h^2 + d^2)$, $I_{yy} = \frac{1}{12} m (w^2 + d^2)$, $I_{zz} = \frac{1}{12} m (w^2 + h^2)$.
+    pub fn with_box_inertia(mut self, size: Vec3) -> Self {
+        if self.body_type == RigidBodyType::Dynamic && self.inv_mass > 0.0 {
+            let w = size.x.max(1e-4);
+            let h = size.y.max(1e-4);
+            let d = size.z.max(1e-4);
+
+            let i_xx = (1.0 / 12.0) * self.mass * (h * h + d * d);
+            let i_yy = (1.0 / 12.0) * self.mass * (w * w + d * d);
+            let i_zz = (1.0 / 12.0) * self.mass * (w * w + h * h);
+
+            self.inv_inertia_local = Mat3::from_diagonal(Vec3::new(
+                1.0 / i_xx,
+                1.0 / i_yy,
+                1.0 / i_zz,
+            ));
+        } else {
+            self.inv_inertia_local = Mat3::ZERO;
+        }
+        self
+    }
+
+    /// Calculates and configures the inverse inertia tensor for a solid uniform sphere with given `radius`.
+    ///
+    /// Principle moment: $I = \frac{2}{5} m r^2$.
+    pub fn with_sphere_inertia(mut self, radius: f32) -> Self {
+        if self.body_type == RigidBodyType::Dynamic && self.inv_mass > 0.0 {
+            let r = radius.max(1e-4);
+            let i = 0.4 * self.mass * (r * r);
+            self.inv_inertia_local = Mat3::from_diagonal(Vec3::splat(1.0 / i));
+        } else {
+            self.inv_inertia_local = Mat3::ZERO;
+        }
+        self
+    }
+
+    /// Sets explicit local inverse inertia tensor matrix.
+    pub fn with_inertia_tensor(mut self, inv_inertia_local: Mat3) -> Self {
+        if self.body_type == RigidBodyType::Dynamic {
+            self.inv_inertia_local = inv_inertia_local;
+        } else {
+            self.inv_inertia_local = Mat3::ZERO;
+        }
+        self
+    }
+
+    /// Transforms local inverse inertia tensor into world space coordinates via body orientation quaternion.
+    #[inline]
+    pub fn inv_inertia_world(&self, rotation: Quat) -> Mat3 {
+        if self.body_type != RigidBodyType::Dynamic {
+            Mat3::ZERO
+        } else {
+            let rot_mat = Mat3::from_quat(rotation);
+            rot_mat * self.inv_inertia_local * rot_mat.transpose()
         }
     }
 
@@ -149,20 +214,21 @@ impl RigidBody {
         }
     }
 
-    /// Applies an instantaneous angular impulse.
+    /// Applies an instantaneous angular impulse using local inverse inertia tensor ($\Delta \boldsymbol{\omega} = I^{-1} \cdot \mathbf{L}$).
     #[inline]
     pub fn apply_angular_impulse(&mut self, angular_impulse: Vec3) {
         if self.body_type == RigidBodyType::Dynamic {
-            self.angular_velocity += angular_impulse * self.inv_mass;
+            self.angular_velocity += self.inv_inertia_local * angular_impulse;
         }
     }
 
-    /// Reconfigures mass and recalculates inverse mass.
+    /// Reconfigures mass and recalculates inverse mass and default inertia.
     pub fn set_mass(&mut self, mass: f32) {
         if self.body_type == RigidBodyType::Dynamic {
             let safe_mass = mass.max(1e-5);
             self.mass = safe_mass;
             self.inv_mass = 1.0 / safe_mass;
+            self.inv_inertia_local = Mat3::from_diagonal(Vec3::splat(self.inv_mass * 2.5));
         }
     }
 

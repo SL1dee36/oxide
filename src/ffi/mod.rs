@@ -1280,7 +1280,8 @@ pub unsafe extern "C" fn oxide_scene_spawn_rigid_body_box(
         };
         let rb = RigidBody::new(mass, body_type)
             .with_restitution(restitution)
-            .with_friction(friction);
+            .with_friction(friction)
+            .with_box_inertia(size_v);
         let entity = s.world.spawn_rigid_body_with_mesh(mesh, transform.into(), collider, rb);
         return entity.to_ffi();
     }
@@ -1308,7 +1309,8 @@ pub unsafe extern "C" fn oxide_scene_spawn_rigid_body_sphere(
         };
         let rb = RigidBody::new(mass, body_type)
             .with_restitution(restitution)
-            .with_friction(friction);
+            .with_friction(friction)
+            .with_sphere_inertia(radius);
         let entity = s.world.spawn_rigid_body_with_mesh(mesh, transform.into(), collider, rb);
         return entity.to_ffi();
     }

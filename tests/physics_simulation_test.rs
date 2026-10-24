@@ -279,3 +279,36 @@ fn test_ffi_soft_body_particle_manipulation() {
         oxide_scene_destroy(scene);
     }
 }
+
+#[test]
+fn test_rigid_body_off_center_collision_induces_rotation() {
+    let mut world = World::new();
+
+    // Static obstacle box at y = 0.0 with size 2x2x2 (top surface at y = 1.0, centered at x = 0.0)
+    let obstacle = world.spawn();
+    world.set_transform(obstacle, Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)));
+    world.collider.insert(obstacle, Collider::box_3d(Vec3::new(2.0, 2.0, 2.0)));
+    world.rigid_body.insert(obstacle, RigidBody::new_static());
+
+    // Dynamic box falling off-center at x = 0.8, y = 1.4 with size 1x1x1 (bottom at y = 0.9 penetrating at y = 1.0)
+    let box_entity = world.spawn_rigid_body(
+        2.0,
+        Transform::from_translation(Vec3::new(0.8, 1.4, 0.0)),
+        Collider::box_3d(Vec3::new(1.0, 1.0, 1.0)),
+    );
+
+    // Initial downward velocity, zero initial angular velocity
+    if let Some(rb) = world.rigid_body_mut(box_entity) {
+        rb.velocity = Vec3::new(0.0, -2.0, 0.0);
+        assert_eq!(rb.angular_velocity, Vec3::ZERO);
+    }
+
+    world.step_physics(0.016);
+
+    let rb = world.rigid_body(box_entity).expect("RigidBody must exist");
+    assert!(
+        rb.angular_velocity.length() > 0.0,
+        "Off-center collision must induce angular velocity, got: {:?}",
+        rb.angular_velocity
+    );
+}
