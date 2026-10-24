@@ -26,7 +26,7 @@ impl SoftBodySystem {
         let static_colliders: Vec<StaticColliderInfo> = world
             .collider
             .keys()
-            .filter(|&e| world.is_alive(e) && world.is_static(e))
+            .filter(|&e| world.is_alive(e) && world.rigid_body.get(e).is_none_or(|rb| !rb.is_dynamic()))
             .filter_map(|e| {
                 let collider = *world.collider.get(e)?;
                 let transform = world.global_transform_matrix(e);

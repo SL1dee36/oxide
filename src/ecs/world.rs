@@ -319,7 +319,7 @@ impl World {
         if let Some(rb) = self.rigid_body.get(entity) {
             rb.is_static()
         } else {
-            self.collider.contains_key(entity)
+            false
         }
     }
 

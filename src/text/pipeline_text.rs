@@ -9,36 +9,40 @@ use glow::HasContext;
 const VERTEX_SHADER_TEXT: &str = r#"#version 450 core
 layout(location = 0) in vec2 a_position;
 layout(location = 1) in vec2 a_uv;
+layout(location = 2) in vec4 a_color;
 
 uniform mat4 u_projection;
 
 out vec2 v_uv;
+out vec4 v_color;
 
 void main() {
     v_uv = a_uv;
+    v_color = a_color;
     gl_Position = u_projection * vec4(a_position, 0.0, 1.0);
 }
 "#;
 
 const FRAGMENT_SHADER_TEXT: &str = r#"#version 450 core
 in vec2 v_uv;
+in vec4 v_color;
 
-uniform vec4 u_color;
 uniform sampler2D u_atlas;
 
 out vec4 o_color;
 
 void main() {
     float alpha = texture(u_atlas, v_uv).a;
-    o_color = vec4(u_color.rgb, u_color.a * alpha);
+    o_color = vec4(v_color.rgb, v_color.a * alpha);
 }
 "#;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct TextVertex {
-    position: [f32; 2],
-    uv: [f32; 2],
+pub struct TextVertex {
+    pub position: [f32; 2],
+    pub uv: [f32; 2],
+    pub color: [f32; 4],
 }
 
 /// Specialized graphics pipeline for rendering batched 2D text quads from a glyph texture atlas.
@@ -77,6 +81,10 @@ impl PipelineText {
             gl.enable_vertex_attrib_array(1);
             let uv_offset = 2 * std::mem::size_of::<f32>() as i32;
             gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, stride, uv_offset);
+
+            gl.enable_vertex_attrib_array(2);
+            let color_offset = 4 * std::mem::size_of::<f32>() as i32;
+            gl.vertex_attrib_pointer_f32(2, 4, glow::FLOAT, false, stride, color_offset);
         }
 
         vao.unbind(gl);
@@ -96,6 +104,9 @@ impl PipelineText {
 
     /// Sets up 2D screen orthographic projection and alpha blending for typography pass.
     pub fn begin(&mut self, gl: &glow::Context, screen_width: f32, screen_height: f32) {
+        self.vertex_batch.clear();
+        self.index_batch.clear();
+
         unsafe {
             gl.disable(glow::DEPTH_TEST);
             gl.enable(glow::BLEND);
@@ -116,10 +127,10 @@ impl PipelineText {
         self.shader.set_int(gl, "u_atlas", 0);
     }
 
-    /// Batches characters from `text` into quad vertices and submits a single draw call without heap reallocations.
+    /// Batches characters from `text` into quad vertices and indices without immediately submitting a draw call.
     pub fn draw_text(
         &mut self,
-        gl: &glow::Context,
+        _gl: &glow::Context,
         atlas: &FontAtlas,
         text: &str,
         origin: Vec2,
@@ -130,12 +141,10 @@ impl PipelineText {
             return Ok(());
         }
 
-        self.vertex_batch.clear();
-        self.index_batch.clear();
-
         let mut cursor_x = origin.x;
         let mut cursor_y = origin.y;
         let line_height = atlas.line_height * scale;
+        let col = color.to_array();
 
         for c in text.chars() {
             if c == '\n' {
@@ -156,18 +165,22 @@ impl PipelineText {
                     self.vertex_batch.push(TextVertex {
                         position: [gx, gy],
                         uv: [glyph.uv_min.x, glyph.uv_min.y],
+                        color: col,
                     });
                     self.vertex_batch.push(TextVertex {
                         position: [gx + gw, gy],
                         uv: [glyph.uv_max.x, glyph.uv_min.y],
+                        color: col,
                     });
                     self.vertex_batch.push(TextVertex {
                         position: [gx + gw, gy + gh],
                         uv: [glyph.uv_max.x, glyph.uv_max.y],
+                        color: col,
                     });
                     self.vertex_batch.push(TextVertex {
                         position: [gx, gy + gh],
                         uv: [glyph.uv_min.x, glyph.uv_max.y],
+                        color: col,
                     });
 
                     self.index_batch.extend_from_slice(&[
@@ -186,11 +199,15 @@ impl PipelineText {
             }
         }
 
+        Ok(())
+    }
+
+    /// Submits all accumulated text quads in a single draw call.
+    pub fn flush(&mut self, gl: &glow::Context, atlas: &FontAtlas) {
         if self.vertex_batch.is_empty() {
-            return Ok(());
+            return;
         }
 
-        self.shader.set_vec4(gl, "u_color", color.to_vec4());
         atlas.texture.bind(gl, 0);
 
         self.vbo.update_sub_data(gl, 0, &self.vertex_batch);
@@ -209,7 +226,8 @@ impl PipelineText {
         self.vao.unbind(gl);
         self.ebo.unbind(gl);
 
-        Ok(())
+        self.vertex_batch.clear();
+        self.index_batch.clear();
     }
 
     /// Returns the CPU buffer capacities `(vertex_capacity, index_capacity)`.
@@ -217,8 +235,9 @@ impl PipelineText {
         (self.vertex_batch.capacity(), self.index_batch.capacity())
     }
 
-    /// Restores depth testing and disables blending upon pass completion.
-    pub fn end(&self, gl: &glow::Context) {
+    /// Flushes remaining text and restores depth testing and disables blending upon pass completion.
+    pub fn end(&mut self, gl: &glow::Context, atlas: &FontAtlas) {
+        self.flush(gl, atlas);
         self.shader.unbind(gl);
         unsafe {
             gl.disable(glow::BLEND);

@@ -191,7 +191,7 @@ impl RenderSystem {
                 let _ =
                     ptext.draw_text(ctx.gl, atlas, &text.content, pos, text.color, final_scale);
             }
-            ptext.end(ctx.gl);
+            ptext.end(ctx.gl, atlas);
         }
     }
 
