@@ -10,11 +10,36 @@ use crate::ecs::systems::{update_behaviors_system, update_hierarchy_system};
 use crate::physics::rigid_body::{RigidBody, RigidBodyType};
 use crate::physics::soft_body::SoftBody;
 use crate::physics::systems::step_physics_system;
+use crate::renderer::buffer::{IndexBuffer, VertexArray, VertexBuffer};
 use crate::renderer::pipeline_3d::Light3D;
 use crate::spatial::camera::Camera;
 use crate::text::text2d::Text2D;
 use glam::{Mat4, Vec3};
 use slotmap::{SecondaryMap, SlotMap};
+
+/// Represents allocated GPU buffers orphaned from an ECS entity upon despawn,
+/// pending explicit OpenGL deallocation within the active rendering context.
+#[derive(Debug)]
+pub struct PendingGpuMeshCleanup {
+    pub vao: Option<VertexArray>,
+    pub vbo: Option<VertexBuffer>,
+    pub ebo: Option<IndexBuffer>,
+}
+
+impl PendingGpuMeshCleanup {
+    /// Destroys the encapsulated OpenGL buffers and array objects.
+    pub fn destroy(self, gl: &glow::Context) {
+        if let Some(vao) = self.vao {
+            vao.destroy(gl);
+        }
+        if let Some(vbo) = self.vbo {
+            vbo.destroy(gl);
+        }
+        if let Some(ebo) = self.ebo {
+            ebo.destroy(gl);
+        }
+    }
+}
 
 /// Central Entity-Component-System (ECS) data store managing entities, decoupled component tables, and world resources.
 pub struct World {
@@ -48,6 +73,9 @@ pub struct World {
     /// Dynamic procedural behaviors.
     pub behaviors: SecondaryMap<EntityId, Box<dyn NodeBehavior>>,
 
+    /// Queue of orphaned GPU resources pending OpenGL deallocation.
+    pub pending_gpu_cleanup: Vec<PendingGpuMeshCleanup>,
+
     /// Active viewing camera resource.
     pub camera: Camera,
     /// Active directional light resource.
@@ -72,6 +100,7 @@ impl World {
             text_2d: SecondaryMap::new(),
             names: SecondaryMap::new(),
             behaviors: SecondaryMap::new(),
+            pending_gpu_cleanup: Vec::new(),
             camera: Camera::default(),
             light: Light3D::default(),
         }
@@ -127,7 +156,15 @@ impl World {
         self.collider.remove(entity);
         self.rigid_body.remove(entity);
         self.soft_body.remove(entity);
-        self.mesh_3d.remove(entity);
+        if let Some(mut mesh) = self.mesh_3d.remove(entity) {
+            if mesh.vao.is_some() || mesh.vbo.is_some() || mesh.ebo.is_some() {
+                self.pending_gpu_cleanup.push(PendingGpuMeshCleanup {
+                    vao: mesh.vao.take(),
+                    vbo: mesh.vbo.take(),
+                    ebo: mesh.ebo.take(),
+                });
+            }
+        }
         self.surface_2d.remove(entity);
         self.text_2d.remove(entity);
         self.names.remove(entity);

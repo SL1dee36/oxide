@@ -57,4 +57,8 @@ fn test_surface_2d_creation() {
     let surface = Surface2D::from_color(Vec2::new(100.0, 50.0), Color::RED);
     assert_eq!(surface.size, Vec2::new(100.0, 50.0));
     assert_eq!(surface.color, Color::RED);
+    assert!(surface.texture.is_none());
+
+    let mesh = Mesh3D::cube(2.0);
+    assert!(mesh.texture.is_none());
 }

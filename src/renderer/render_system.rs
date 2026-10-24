@@ -46,6 +46,11 @@ impl RenderSystem {
 
     /// Executes multi-pass rendering across all visual components in `world`.
     pub fn render_world(&mut self, ctx: &mut Context, world: &mut World) {
+        // Drain and destroy any orphaned GPU resources from despawned entities
+        for cleanup in world.pending_gpu_cleanup.drain(..) {
+            cleanup.destroy(ctx.gl);
+        }
+
         // Ensure 3D pipeline
         if self.pipeline_3d.is_none() {
             match Pipeline3D::new(ctx.gl) {
@@ -118,7 +123,7 @@ impl RenderSystem {
                         &global,
                         mesh.color,
                         mesh.emissive,
-                        None,
+                        mesh.texture.as_deref(),
                         vao,
                         ebo,
                     );
@@ -156,7 +161,7 @@ impl RenderSystem {
                     rot,
                     Vec3::new(trans.x, trans.y, 0.0),
                 );
-                p2d.draw(ctx.gl, &model_2d, surface.color, None);
+                p2d.draw(ctx.gl, &model_2d, surface.color, surface.texture.as_deref());
             }
             p2d.end(ctx.gl);
         }
@@ -190,8 +195,16 @@ impl RenderSystem {
         }
     }
 
-    /// Releases GPU pipelines, shaders, buffers, and texture atlas, preventing VRAM leaks.
-    pub fn destroy(&mut self, gl: &glow::Context) {
+    /// Releases GPU pipelines, shaders, buffers, texture atlas, and drains orphaned world GPU resources.
+    pub fn destroy(&mut self, gl: &glow::Context, world: &mut World) {
+        for cleanup in world.pending_gpu_cleanup.drain(..) {
+            cleanup.destroy(gl);
+        }
+        self.destroy_pipelines(gl);
+    }
+
+    /// Releases GPU pipelines, shaders, buffers, and texture atlas without accessing a world.
+    pub fn destroy_pipelines(&mut self, gl: &glow::Context) {
         if let Some(p3d) = self.pipeline_3d.take() {
             p3d.destroy(gl);
         }

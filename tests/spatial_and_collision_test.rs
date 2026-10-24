@@ -199,3 +199,41 @@ fn test_despawn_node() {
     let dummy_contact = ContactManifold::new(Vec3::X, 1.0, Vec3::ZERO);
     world.resolve_penetration(parent, child_1, &dummy_contact);
 }
+
+#[test]
+fn test_despawn_mesh_gpu_cleanup_queue() {
+    let mut world = World::new();
+
+    // 1. Despawn entity with host-only mesh (no GPU buffers)
+    let e1 = world.spawn();
+    world.mesh_3d.insert(e1, Mesh3D::cube(1.0));
+    assert!(world.mesh_3d.get(e1).is_some());
+    assert_eq!(world.pending_gpu_cleanup.len(), 0);
+
+    assert!(world.despawn(e1));
+    assert!(world.mesh_3d.get(e1).is_none());
+    assert_eq!(world.pending_gpu_cleanup.len(), 0);
+
+    // 2. Despawn entity with initialized GPU buffers
+    let e2 = world.spawn();
+    let mut mesh = Mesh3D::cube(1.0);
+    mesh.vao = Some(oxide::renderer::VertexArray::dummy_for_test());
+    mesh.vbo = Some(oxide::renderer::VertexBuffer::dummy_for_test(24));
+    mesh.ebo = Some(oxide::renderer::IndexBuffer::dummy_for_test(36));
+    world.mesh_3d.insert(e2, mesh);
+
+    assert_eq!(world.pending_gpu_cleanup.len(), 0);
+    assert!(world.despawn(e2));
+    assert!(world.mesh_3d.get(e2).is_none());
+    assert_eq!(world.pending_gpu_cleanup.len(), 1);
+
+    let garbage = &world.pending_gpu_cleanup[0];
+    assert!(garbage.vao.is_some());
+    assert!(garbage.vbo.is_some());
+    assert!(garbage.ebo.is_some());
+
+    // 3. Draining cleanup queue resets it
+    let drained = std::mem::take(&mut world.pending_gpu_cleanup);
+    assert_eq!(drained.len(), 1);
+    assert_eq!(world.pending_gpu_cleanup.len(), 0);
+}

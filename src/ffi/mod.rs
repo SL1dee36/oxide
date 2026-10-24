@@ -625,6 +625,12 @@ pub unsafe extern "C" fn oxide_scene_create() -> *mut OxideScene {
 }
 
 /// Deallocates an [`OxideScene`] previously created via [`oxide_scene_create`].
+///
+/// # VRAM Deallocation Note
+/// This immediately deallocates host-side memory for the scene graph and ECS world.
+/// To ensure any allocated OpenGL buffers and textures are cleanly released from VRAM,
+/// callers running within an active OpenGL context should ensure frames are rendered or
+/// the rendering system is destroyed prior to releasing the scene.
 #[no_mangle]
 pub unsafe extern "C" fn oxide_scene_destroy(scene: *mut OxideScene) {
     if !scene.is_null() {

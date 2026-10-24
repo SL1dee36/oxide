@@ -2,6 +2,8 @@ use crate::core::color::Color;
 use crate::core::error::OxideError;
 use crate::renderer::buffer::{IndexBuffer, Vertex3D, VertexArray, VertexBuffer};
 use crate::renderer::pipeline_3d::Pipeline3D;
+use crate::renderer::texture::Texture2D;
+use std::sync::Arc;
 
 /// Host-side 3D polygonal mesh geometry with lazily initialized GPU buffers.
 pub struct Mesh3D {
@@ -13,6 +15,8 @@ pub struct Mesh3D {
     pub color: Color,
     /// Self-illumination emissive color tint.
     pub emissive: Color,
+    /// Optional diffuse 2D texture map.
+    pub texture: Option<Arc<Texture2D>>,
     /// Allocated GPU vertex array object.
     pub vao: Option<VertexArray>,
     /// Allocated GPU vertex buffer object.
@@ -29,6 +33,7 @@ impl Mesh3D {
             indices,
             color: Color::WHITE,
             emissive: Color::rgba(0.0, 0.0, 0.0, 0.0),
+            texture: None,
             vao: None,
             vbo: None,
             ebo: None,
@@ -44,6 +49,12 @@ impl Mesh3D {
     /// Sets the emissive color.
     pub fn with_emissive(mut self, emissive: Color) -> Self {
         self.emissive = emissive;
+        self
+    }
+
+    /// Associates a diffuse 2D texture map with the mesh.
+    pub fn with_texture(mut self, texture: Arc<Texture2D>) -> Self {
+        self.texture = Some(texture);
         self
     }
 

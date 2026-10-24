@@ -2,6 +2,7 @@ use crate::core::error::OxideError;
 use glow::HasContext;
 
 /// 2D texture allocation resident in GPU memory (`GL_TEXTURE_2D`).
+#[derive(Debug)]
 pub struct Texture2D {
     id: glow::Texture,
     width: u32,
