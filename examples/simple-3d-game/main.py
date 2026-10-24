@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Simple Interactive 3D simulation in Oxide
+Simple Interactive 3D simulation in Oxide powered by native engine physics.
 
 Features:
-- Cursor recentering and capture (Press [Esc] to toggle/release mouse).
+- Cross-platform cursor capture using native Context API ([Esc] to toggle/release mouse).
+- Native 6-DOF RigidBody simulation (gravity, friction, restitution, inertia tensors).
 - Pick up Cube or Sphere by pressing [E] when within reach.
 - Drop/put down held object gently by pressing [E].
 - Throw held object forward with force by clicking Left Mouse Button [LMB].
 - Inspect/rotate held object by holding Right Mouse Button [RMB] and dragging mouse.
-  (While RMB is held, camera pitch/yaw remains stationary, and the object rotates).
-- Realistic bounce, friction, rolling physics, and mutual collision resolution.
 - Dynamic crosshair and interactive HUD status overlay.
 """
 
@@ -17,7 +16,6 @@ import os
 import sys
 import math
 import random
-import ctypes
 
 # Ensure oxide runtime binding is importable
 BINDINGS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../bindings/python"))
@@ -37,185 +35,28 @@ from oxide import (
 )
 
 
-class WindowsMouseController:
-    """
-    Provides infinite 360-degree mouse look on Windows by locking and recentering
-    the cursor to the window center every frame.
-    """
-    def __init__(self, window_title):
-        self.window_title = window_title
-        self.user32 = getattr(ctypes, "windll", None) and getattr(ctypes.windll, "user32", None)
-        self.hwnd = None
-        self.grabbed = False
-        self.just_grabbed = True
-
-    def find_window(self):
-        if not self.user32:
-            return None
-        hwnd = self.user32.FindWindowW(None, self.window_title)
-        if not hwnd:
-            hwnd = self.user32.GetForegroundWindow()
-        self.hwnd = hwnd
-        return hwnd
-
-    def get_window_center(self):
-        if not self.user32:
-            return None, None
-        if not self.hwnd:
-            self.find_window()
-        if not self.hwnd:
-            return None, None
-
-        class RECT(ctypes.Structure):
-            _fields_ = [
-                ("left", ctypes.c_long),
-                ("top", ctypes.c_long),
-                ("right", ctypes.c_long),
-                ("bottom", ctypes.c_long),
-            ]
-
-        class POINT(ctypes.Structure):
-            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-
-        rect = RECT()
-        if not self.user32.GetClientRect(self.hwnd, ctypes.byref(rect)):
-            return None, None
-
-        w = rect.right - rect.left
-        h = rect.bottom - rect.top
-        if w <= 0 or h <= 0:
-            return None, None
-
-        pt = POINT(w // 2, h // 2)
-        self.user32.ClientToScreen(self.hwnd, ctypes.byref(pt))
-        return pt.x, pt.y
-
-    def set_grabbed(self, grabbed: bool, ctx=None):
-        self.grabbed = grabbed
-        self.just_grabbed = True
-        if ctx:
-            ctx.set_cursor_visible(not grabbed)
-            ctx.set_cursor_grab(grabbed)
-        if grabbed and self.user32:
-            cx, cy = self.get_window_center()
-            if cx is not None:
-                self.user32.SetCursorPos(cx, cy)
-
-    def get_delta(self, fallback_delta: Vec2):
-        if not self.grabbed or not self.user32:
-            return Vec2(0.0, 0.0)
-
-        # Ensure the game window is currently in focus
-        foreground = self.user32.GetForegroundWindow()
-        if self.hwnd and foreground != self.hwnd:
-            return Vec2(0.0, 0.0)
-
-        cx, cy = self.get_window_center()
-        if cx is None:
-            return fallback_delta
-
-        class POINT(ctypes.Structure):
-            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-
-        cur = POINT()
-        if not self.user32.GetCursorPos(ctypes.byref(cur)):
-            return fallback_delta
-
-        if self.just_grabbed:
-            self.just_grabbed = False
-            self.user32.SetCursorPos(cx, cy)
-            return Vec2(0.0, 0.0)
-
-        dx = float(cur.x - cx)
-        dy = float(cur.y - cy)
-
-        # Re-center cursor to the client center every frame
-        if dx != 0 or dy != 0:
-            self.user32.SetCursorPos(cx, cy)
-
-        return Vec2(dx, dy)
-
-
 class PhysicsObject:
-    """Manages physical state (velocity, gravity, bounce, rotation) for a 3D scene node."""
+    """Manages physical state for a 3D scene node backed by Oxide's native RigidBody physics."""
 
-    def __init__(self, node_id, name, kind, size_or_radius, color, initial_pos):
+    def __init__(self, node_id, name, kind, size_or_radius, color):
         self.node_id = int(node_id)
         self.name = name
         self.kind = kind  # "cube" or "sphere"
         self.size_or_radius = float(size_or_radius)
         self.color = color
-        self.position = initial_pos
-        self.velocity = Vec3(0.0, 0.0, 0.0)
-        self.angular_velocity = Vec3(0.0, 0.0, 0.0)
         self.is_held = False
-        self.rotation = Quat(0.0, 0.0, 0.0, 1.0)
-
-    @property
-    def bottom_offset(self):
-        return self.size_or_radius if self.kind == "sphere" else (self.size_or_radius * 0.5)
-
-    def update_physics(self, dt, floor_y=0.0):
-        if self.is_held:
-            return
-
-        # Gravity
-        gravity = Vec3(0.0, -19.6, 0.0)
-        self.velocity = self.velocity + gravity * dt
-        self.position = self.position + self.velocity * dt
-
-        # Floor collision
-        bottom = self.position.y - self.bottom_offset
-        if bottom < floor_y:
-            self.position.y = floor_y + self.bottom_offset
-            restitution = 0.68 if self.kind == "sphere" else 0.40
-            friction = 0.94 if self.kind == "sphere" else 0.86
-
-            self.velocity.y = -self.velocity.y * restitution
-            self.velocity.x *= friction
-            self.velocity.z *= friction
-            self.angular_velocity = self.angular_velocity * 0.85
-
-            if abs(self.velocity.y) < 0.25:
-                self.velocity.y = 0.0
-
-            # Rolling rotation for sphere on ground
-            if self.kind == "sphere":
-                h_speed = math.hypot(self.velocity.x, self.velocity.z)
-                if h_speed > 0.05:
-                    roll_rate = h_speed / self.size_or_radius
-                    roll_axis = Vec3(-self.velocity.z, 0.0, self.velocity.x).normalize()
-                    delta_q = Quat.from_axis_angle(roll_axis, roll_rate * dt)
-                    self.rotation = delta_q * self.rotation
-
-        # Platform bounds rebound (keep objects inside play area [-28, 28])
-        bound = 27.5
-        for axis in ["x", "z"]:
-            val = getattr(self.position, axis)
-            if abs(val) > bound:
-                sign = 1.0 if val > 0 else -1.0
-                setattr(self.position, axis, sign * bound)
-                vel_val = getattr(self.velocity, axis)
-                setattr(self.velocity, axis, -vel_val * 0.6)
-
-        # Free flight spin damping
-        if abs(self.angular_velocity.length_squared()) > 1e-4:
-            spin_mag = self.angular_velocity.length()
-            spin_axis = self.angular_velocity.normalize()
-            delta_q = Quat.from_axis_angle(spin_axis, spin_mag * dt)
-            self.rotation = delta_q * self.rotation
-            self.angular_velocity = self.angular_velocity * (1.0 - 0.4 * dt)
+        self.held_rotation = Quat(0.0, 0.0, 0.0, 1.0)
 
 
 class Simple3DGame:
-    def __init__(self, window_title="Oxide - 3D Interactive World (Cube & Sphere)"):
+    def __init__(self, window_title="Oxide - 3D Interactive World (Native Physics)"):
         self.scene = Scene()
         self.window_title = window_title
         self.screen_width = 1280
         self.screen_height = 720
 
-        # Mouse recentering controller for infinite 360-degree rotation
-        self.mouse_ctrl = WindowsMouseController(self.window_title)
+        # Cross-platform cursor state
+        self.cursor_grabbed = False
 
         # Camera & Player state
         self.player_pos = Vec3(0.0, 1.7, 3.5)
@@ -242,8 +83,10 @@ class Simple3DGame:
         self.target_hint_node = None
 
     def on_init(self, ctx: Context):
-        # 1. Grab and center mouse cursor for infinite 360 FPS view
-        self.mouse_ctrl.set_grabbed(True, ctx)
+        # 1. Grab mouse cursor for infinite 360 FPS view
+        self.cursor_grabbed = True
+        ctx.set_cursor_visible(False)
+        ctx.set_cursor_grab(True)
 
         # Configure Viewport & 3D Perspective Camera
         self.update_camera(ctx)
@@ -256,47 +99,68 @@ class Simple3DGame:
             ambient=Vec3(0.32, 0.35, 0.42),
         )
 
-        # 2. Flat World Platform (56x56 units, static obstacle)
+        # 2. Flat World Platform (56x56 units, static rigid body floor)
         floor_w, floor_h, floor_d = 56.0, 0.6, 56.0
-        self.floor_node = self.scene.spawn_box_3d(
-            floor_w,
-            floor_h,
-            floor_d,
+        self.floor_node = self.scene.spawn_rigid_body_box(
+            Vec3(floor_w, floor_h, floor_d),
             transform=Transform.from_xyz(0.0, -floor_h * 0.5, 0.0),
-            color=Color(0.20, 0.24, 0.30, 1.0),
+            mass=0.0,
+            restitution=0.4,
+            friction=0.8,
             is_static=True,
         )
+        self.scene.node_set_color(self.floor_node, Color(0.20, 0.24, 0.30, 1.0))
 
-        # Perimeter curbs
+        # Perimeter curbs (static rigid body obstacles)
         curb_color = Color(0.35, 0.40, 0.50, 1.0)
         ch = 0.8
-        self.scene.spawn_box_3d(floor_w, ch, 0.8, transform=Transform.from_xyz(0.0, ch * 0.5, -28.0), color=curb_color, is_static=True)
-        self.scene.spawn_box_3d(floor_w, ch, 0.8, transform=Transform.from_xyz(0.0, ch * 0.5, 28.0), color=curb_color, is_static=True)
-        self.scene.spawn_box_3d(0.8, ch, floor_d, transform=Transform.from_xyz(-28.0, ch * 0.5, 0.0), color=curb_color, is_static=True)
-        self.scene.spawn_box_3d(0.8, ch, floor_d, transform=Transform.from_xyz(28.0, ch * 0.5, 0.0), color=curb_color, is_static=True)
+        for curb_size, curb_pos in [
+            (Vec3(floor_w, ch, 0.8), Vec3(0.0, ch * 0.5, -28.0)),
+            (Vec3(floor_w, ch, 0.8), Vec3(0.0, ch * 0.5, 28.0)),
+            (Vec3(0.8, ch, floor_d), Vec3(-28.0, ch * 0.5, 0.0)),
+            (Vec3(0.8, ch, floor_d), Vec3(28.0, ch * 0.5, 0.0)),
+        ]:
+            node = self.scene.spawn_rigid_body_box(
+                curb_size,
+                transform=Transform.from_xyz(curb_pos.x, curb_pos.y, curb_pos.z),
+                mass=0.0,
+                restitution=0.5,
+                friction=0.8,
+                is_static=True,
+            )
+            self.scene.node_set_color(node, curb_color)
+            self.boundary_nodes.append(node)
 
-        # 3. Interactive Objects: Cube and Sphere
-        # Cube: size 1.0, warm amber/coral
+        # 3. Interactive Native Physics Objects: Cube and Sphere
+        # Cube: dynamic box of size 1.0, mass 2.0 kg
         cube_size = 1.0
-        cube_pos = Vec3(-2.2, cube_size * 0.5, -3.0)
+        cube_pos = Vec3(-2.2, cube_size * 0.5 + 0.1, -3.0)
         cube_color = Color(1.0, 0.46, 0.18, 1.0)
-        c_node = self.scene.spawn_cube_3d(
-            cube_size,
+        c_node = self.scene.spawn_rigid_body_box(
+            Vec3(cube_size, cube_size, cube_size),
             transform=Transform.from_xyz(cube_pos.x, cube_pos.y, cube_pos.z),
-            color=cube_color,
+            mass=2.0,
+            restitution=0.42,
+            friction=0.65,
+            is_static=False,
         )
-        self.cube = PhysicsObject(c_node, "Cube", "cube", cube_size, cube_color, cube_pos)
+        self.scene.node_set_color(c_node, cube_color)
+        self.cube = PhysicsObject(c_node, "Cube", "cube", cube_size, cube_color)
 
-        # Sphere: radius 0.6, radiant neon emerald
+        # Sphere: dynamic sphere of radius 0.6, mass 1.5 kg
         sphere_radius = 0.6
-        sphere_pos = Vec3(2.2, sphere_radius, -3.0)
+        sphere_pos = Vec3(2.2, sphere_radius + 0.1, -3.0)
         sphere_color = Color(0.18, 0.88, 0.62, 1.0)
-        s_node = self.scene.spawn_sphere_3d(
+        s_node = self.scene.spawn_rigid_body_sphere(
             sphere_radius,
             transform=Transform.from_xyz(sphere_pos.x, sphere_pos.y, sphere_pos.z),
-            color=sphere_color,
+            mass=1.5,
+            restitution=0.68,
+            friction=0.55,
+            is_static=False,
         )
-        self.sphere = PhysicsObject(s_node, "Sphere", "sphere", sphere_radius, sphere_color, sphere_pos)
+        self.scene.node_set_color(s_node, sphere_color)
+        self.sphere = PhysicsObject(s_node, "Sphere", "sphere", sphere_radius, sphere_color)
 
         # 4. HUD UI Elements
         sw = float(self.screen_width)
@@ -315,13 +179,13 @@ class Simple3DGame:
         # Top Information Cards
         panel_color = Color(0.10, 0.13, 0.20, 0.88)
         self.scene.spawn_surface_2d(
-            Vec2(500.0, 120.0),
+            Vec2(520.0, 120.0),
             color=panel_color,
             transform=Transform.from_xyz(24.0, 24.0, 0.0),
         )
 
         self.title_node = self.scene.spawn_text_2d(
-            "Oxide 3D - Interactive Demo",
+            "Oxide 3D - Native Physics Engine",
             color=Color(0.35, 0.85, 1.0),
             scale=0.82,
             transform=Transform.from_xyz(38.0, 46.0, 0.0),
@@ -343,7 +207,7 @@ class Simple3DGame:
 
         # Bottom Instructions Panel
         self.scene.spawn_surface_2d(
-            Vec2(660.0, 42.0),
+            Vec2(680.0, 42.0),
             color=Color(0.08, 0.10, 0.16, 0.85),
             transform=Transform.from_xyz(24.0, sh - 66.0, 0.0),
         )
@@ -390,27 +254,29 @@ class Simple3DGame:
         rmb_down = ctx.is_mouse_button_down(MouseButton.RIGHT)
 
         # ----------------------------------------------------
-        # 0. Cursor Capture & Infinite 360-Degree Mouse Delta
+        # 0. Cursor Capture & Mouse Delta Handling
         # ----------------------------------------------------
         # Press [Escape] to release or toggle cursor grab
         if ctx.is_key_just_pressed("Escape"):
-            self.mouse_ctrl.set_grabbed(not self.mouse_ctrl.grabbed, ctx)
+            self.cursor_grabbed = not self.cursor_grabbed
+            ctx.set_cursor_visible(not self.cursor_grabbed)
+            ctx.set_cursor_grab(self.cursor_grabbed)
 
         # Click left mouse button to re-grab cursor if currently free
-        if not self.mouse_ctrl.grabbed:
+        if not self.cursor_grabbed:
             if ctx.is_mouse_button_just_pressed(MouseButton.LEFT):
-                self.mouse_ctrl.set_grabbed(True, ctx)
+                self.cursor_grabbed = True
+                ctx.set_cursor_visible(False)
+                ctx.set_cursor_grab(True)
             m_delta = Vec2(0.0, 0.0)
         else:
-            m_delta = self.mouse_ctrl.get_delta(ctx.mouse_delta)
+            m_delta = ctx.mouse_delta
 
         # ----------------------------------------------------
         # 1. Mouse Interaction: Camera Look vs Object Rotation
         # ----------------------------------------------------
-        # SPEC: "правой кнопкой (зажав) можно двигать мышкой
-        # (камера не двигается, а объект крутится)."
         if self.held_object is not None and rmb_down:
-            # Camera DOES NOT move; held object rotates in hand
+            # Camera remains stationary; held object rotates in player's hands
             rot_sensitivity = 0.007
             dx = m_delta.x * rot_sensitivity
             dy = m_delta.y * rot_sensitivity
@@ -418,13 +284,9 @@ class Simple3DGame:
             # Rotate around camera UP and RIGHT axes
             q_yaw = Quat.from_axis_angle(up, dx)
             q_pitch = Quat.from_axis_angle(right, dy)
-            self.held_object.rotation = q_pitch * (q_yaw * self.held_object.rotation)
-        elif self.mouse_ctrl.grabbed:
-            # Standard, natural mouse look (infinite 360 rotation):
-            # Move mouse RIGHT -> view turns RIGHT
-            # Move mouse LEFT  -> view turns LEFT
-            # Move mouse UP    -> view looks UP
-            # Move mouse DOWN  -> view looks DOWN
+            self.held_object.held_rotation = q_pitch * (q_yaw * self.held_object.held_rotation)
+            self.scene.node_set_rotation(self.held_object.node_id, self.held_object.held_rotation)
+        elif self.cursor_grabbed:
             look_sensitivity = 0.0022
             self.yaw += m_delta.x * look_sensitivity
             self.pitch -= m_delta.y * look_sensitivity
@@ -436,7 +298,6 @@ class Simple3DGame:
         # 2. Player Movement (WASD + Jump)
         # ----------------------------------------------------
         move_dir = Vec3(0.0, 0.0, 0.0)
-        # Horizontal forward and right vectors aligned with camera view
         horiz_forward = Vec3(math.sin(self.yaw), 0.0, -math.cos(self.yaw)).normalize()
         horiz_right = Vec3(math.cos(self.yaw), 0.0, math.sin(self.yaw)).normalize()
 
@@ -477,16 +338,17 @@ class Simple3DGame:
         self.aimed_object = None
 
         if ray_hit:
-            if ray_hit.node_id == self.cube.node_id and ray_hit.distance <= 4.8:
+            if ray_hit.node_id == self.cube.node_id and ray_hit.distance <= 5.0:
                 self.aimed_object = self.cube
-            elif ray_hit.node_id == self.sphere.node_id and ray_hit.distance <= 4.8:
+            elif ray_hit.node_id == self.sphere.node_id and ray_hit.distance <= 5.0:
                 self.aimed_object = self.sphere
 
         # Proximity fallback if ray missed slightly
         if self.aimed_object is None and self.held_object is None:
             best_dist = 3.6
             for candidate in [self.cube, self.sphere]:
-                to_obj = candidate.position - self.player_pos
+                cand_pos = self.scene.node_get_translation(candidate.node_id)
+                to_obj = cand_pos - self.player_pos
                 dist = to_obj.length()
                 if dist < best_dist:
                     cos_angle = forward.dot(to_obj.normalize())
@@ -499,30 +361,33 @@ class Simple3DGame:
         # ----------------------------------------------------
         if ctx.is_key_just_pressed("E"):
             if self.held_object is not None:
-                # SPEC: "E - положить" (Put down / release gently)
-                self.held_object.velocity = Vec3(0.0, 0.0, 0.0)
-                self.held_object.angular_velocity = Vec3(0.0, 0.0, 0.0)
+                # Put down / release gently into the physics world
+                self.scene.rigid_body_set_velocity(self.held_object.node_id, Vec3(0.0, 0.0, 0.0))
+                self.scene.rigid_body_set_angular_velocity(self.held_object.node_id, Vec3(0.0, 0.0, 0.0))
                 self.held_object.is_held = False
                 self.held_object = None
             elif self.aimed_object is not None:
-                # SPEC: "подобрать на Е объект"
+                # Pick up: zero out velocity and capture initial rotation
                 self.held_object = self.aimed_object
                 self.held_object.is_held = True
-                self.held_object.velocity = Vec3(0.0, 0.0, 0.0)
-                self.held_object.angular_velocity = Vec3(0.0, 0.0, 0.0)
+                self.held_object.held_rotation = self.scene.node_get_rotation(self.held_object.node_id)
+                self.scene.rigid_body_set_velocity(self.held_object.node_id, Vec3(0.0, 0.0, 0.0))
+                self.scene.rigid_body_set_angular_velocity(self.held_object.node_id, Vec3(0.0, 0.0, 0.0))
 
         # ----------------------------------------------------
         # 5. Throw with Force ([LMB] Click)
         # ----------------------------------------------------
-        # SPEC: "на левый клик мыши кинуть с силой"
-        if ctx.is_mouse_button_just_pressed(MouseButton.LEFT) and self.held_object is not None and self.mouse_ctrl.grabbed:
-            throw_speed = 22.0
+        if ctx.is_mouse_button_just_pressed(MouseButton.LEFT) and self.held_object is not None and self.cursor_grabbed:
+            throw_speed = 20.0
             throw_vec = forward * throw_speed + Vec3(0.0, 2.5, 0.0)
-            self.held_object.velocity = throw_vec
-            self.held_object.angular_velocity = Vec3(
-                random.uniform(-8.0, 8.0),
-                random.uniform(-8.0, 8.0),
-                random.uniform(-8.0, 8.0),
+            self.scene.rigid_body_set_velocity(self.held_object.node_id, throw_vec)
+            self.scene.rigid_body_set_angular_velocity(
+                self.held_object.node_id,
+                Vec3(
+                    random.uniform(-6.0, 6.0),
+                    random.uniform(-6.0, 6.0),
+                    random.uniform(-6.0, 6.0),
+                ),
             )
             self.held_object.is_held = False
             self.held_object = None
@@ -531,49 +396,18 @@ class Simple3DGame:
         # 6. Held Object Position Constraint
         # ----------------------------------------------------
         if self.held_object is not None:
-            hold_dist = 2.1
+            hold_dist = 2.2
             hold_target = self.player_pos + forward * hold_dist
-            self.held_object.position = hold_target
             self.scene.node_set_translation(self.held_object.node_id, hold_target)
-            self.scene.node_set_rotation(self.held_object.node_id, self.held_object.rotation)
+            self.scene.node_set_rotation(self.held_object.node_id, self.held_object.held_rotation)
+            self.scene.rigid_body_set_velocity(self.held_object.node_id, Vec3(0.0, 0.0, 0.0))
+            self.scene.rigid_body_set_angular_velocity(self.held_object.node_id, Vec3(0.0, 0.0, 0.0))
 
         # ----------------------------------------------------
-        # 7. Physical Simulation for Free Objects
-        # ----------------------------------------------------
-        for obj in [self.cube, self.sphere]:
-            if not obj.is_held:
-                obj.update_physics(dt, floor_y=0.0)
-                self.scene.node_set_translation(obj.node_id, obj.position)
-                self.scene.node_set_rotation(obj.node_id, obj.rotation)
-
-        # ----------------------------------------------------
-        # 8. Mutual Collision Resolution (Cube vs Sphere)
-        # ----------------------------------------------------
-        contact = self.scene.check_collision(self.cube.node_id, self.sphere.node_id)
-        if contact:
-            self.scene.resolve_penetration(self.cube.node_id, self.sphere.node_id, contact)
-            self.cube.position = self.scene.node_get_translation(self.cube.node_id)
-            self.sphere.position = self.scene.node_get_translation(self.sphere.node_id)
-
-            # Elastic impulse collision response
-            normal = Vec3(contact.normal.x, contact.normal.y, contact.normal.z).normalize()
-            rel_vel = self.cube.velocity - self.sphere.velocity
-            vel_along_norm = rel_vel.dot(normal)
-
-            if vel_along_norm < 0.0:
-                impulse_mag = -(1.0 + 0.6) * vel_along_norm * 0.5
-                impulse = normal * impulse_mag
-                if not self.cube.is_held:
-                    self.cube.velocity = self.cube.velocity + impulse
-                if not self.sphere.is_held:
-                    self.sphere.velocity = self.sphere.velocity - impulse
-
-        # ----------------------------------------------------
-        # 9. Update UI & Scene
+        # 7. Update UI & Scene (Native Physics Simulation Step)
         # ----------------------------------------------------
         self.update_camera(ctx)
 
-        # Update HUD text safely
         if self.status_node is not None:
             held_name = self.held_object.name if self.held_object else "None"
             fps_text = f"Held: {held_name} | FPS: {ctx.fps:.1f}"
@@ -593,6 +427,7 @@ class Simple3DGame:
             else:
                 self.scene.node_set_text(self.target_hint_node, "Aim at Cube or Sphere to Pick Up")
 
+        # Native physics step & scene hierarchy update
         self.scene.update(ctx, dt)
 
     def on_render(self, ctx: Context):
@@ -601,14 +436,14 @@ class Simple3DGame:
 
 
 if __name__ == "__main__":
-    title = "Oxide - 3D Interactive World (Cube & Sphere)"
+    title = "Oxide - 3D Interactive World (Native Physics)"
     print("=" * 60)
-    print(" Oxide 3D Game Starting...")
+    print(" Oxide 3D Game Starting (Native Physics)...")
     print(" Controls:")
     print("   [W, A, S, D] : Walk")
     print("   [Shift]      : Sprint")
     print("   [Space]      : Jump")
-    print("   [Mouse]      : Full 360-Degree Look (Non-inverted)")
+    print("   [Mouse]      : Full 360-Degree Look")
     print("   [Escape]     : Toggle Cursor Lock")
     print("   [E]          : Pick up / Put down target object")
     print("   [LMB]        : Throw held object with force")
