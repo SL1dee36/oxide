@@ -5,7 +5,6 @@ use crate::collision::manifold::ContactManifold;
 use crate::collision::ray::{Ray3D, RaycastHit};
 use crate::ecs::entity::EntityId;
 use crate::ecs::world::World;
-use crate::spatial::transform::Transform;
 use glam::{Mat4, Vec3};
 
 /// Evaluates geometric intersection between two colliders in world space.
@@ -93,22 +92,11 @@ pub fn resolve_penetration_system(
     let is_static_a = world.is_static(a);
     let is_static_b = world.is_static(b);
 
-    let (Some(trans_a), Some(trans_b)) = (
-        world.transform.get_mut(a).map(|t| t as *mut Transform),
-        world.transform.get_mut(b).map(|t| t as *mut Transform),
-    ) else {
+    let Some([trans_a, trans_b]) = world.transform.get_disjoint_mut([a, b]) else {
         return;
     };
 
-    unsafe {
-        resolve_penetration_weighted(
-            &mut *trans_a,
-            is_static_a,
-            &mut *trans_b,
-            is_static_b,
-            contact,
-        );
-    }
+    resolve_penetration_weighted(trans_a, is_static_a, trans_b, is_static_b, contact);
 
     if world.parent.get(a).is_none() {
         if let Some(t) = world.transform.get(a) {

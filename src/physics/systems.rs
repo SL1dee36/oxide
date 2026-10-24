@@ -3,8 +3,7 @@ use crate::collision::systems::check_collider_intersection;
 use crate::ecs::entity::EntityId;
 use crate::ecs::systems::update_hierarchy_system;
 use crate::ecs::world::World;
-use crate::physics::rigid_body::{RigidBody, RigidBodyType};
-use crate::spatial::transform::Transform;
+use crate::physics::rigid_body::RigidBodyType;
 use glam::{Quat, Vec3};
 
 /// Global environment physics parameters.
@@ -144,22 +143,17 @@ fn resolve_rigid_body_collision(
     let is_static_b = body_b_type != RigidBodyType::Dynamic || body_b_inv_mass == 0.0;
 
     // 1. Positional penetration resolution
-    let (Some(trans_a), Some(trans_b)) = (
-        world.transform.get_mut(a).map(|t| t as *mut Transform),
-        world.transform.get_mut(b).map(|t| t as *mut Transform),
-    ) else {
+    let Some([trans_a, trans_b]) = world.transform.get_disjoint_mut([a, b]) else {
         return;
     };
 
-    unsafe {
-        resolve_penetration_weighted(
-            &mut *trans_a,
-            is_static_a,
-            &mut *trans_b,
-            is_static_b,
-            contact,
-        );
-    }
+    resolve_penetration_weighted(
+        trans_a,
+        is_static_a,
+        trans_b,
+        is_static_b,
+        contact,
+    );
 
     if world.parent.get(a).is_none() {
         if let Some(t) = world.transform.get(a) {
@@ -178,49 +172,44 @@ fn resolve_rigid_body_collision(
         return;
     }
 
-    let (Some(rb_a), Some(rb_b)) = (
-        world.rigid_body.get_mut(a).map(|r| r as *mut RigidBody),
-        world.rigid_body.get_mut(b).map(|r| r as *mut RigidBody),
-    ) else {
+    let Some([rb_a, rb_b]) = world.rigid_body.get_disjoint_mut([a, b]) else {
         return;
     };
 
-    unsafe {
-        let vel_a = (*rb_a).velocity;
-        let vel_b = (*rb_b).velocity;
-        // Velocity of B relative to A
-        let rel_vel = vel_b - vel_a;
+    let vel_a = rb_a.velocity;
+    let vel_b = rb_b.velocity;
+    // Velocity of B relative to A
+    let rel_vel = vel_b - vel_a;
 
-        let vel_along_normal = rel_vel.dot(contact.normal);
-        // Only resolve if bodies are moving toward each other (vel_along_normal < 0)
-        if vel_along_normal < 0.0 {
-            let restitution = body_a_restitution.min(body_b_restitution);
-            let j = -(1.0 + restitution) * vel_along_normal / w_sum;
-            let impulse = contact.normal * j;
+    let vel_along_normal = rel_vel.dot(contact.normal);
+    // Only resolve if bodies are moving toward each other (vel_along_normal < 0)
+    if vel_along_normal < 0.0 {
+        let restitution = body_a_restitution.min(body_b_restitution);
+        let j = -(1.0 + restitution) * vel_along_normal / w_sum;
+        let impulse = contact.normal * j;
 
-            if (*rb_a).is_dynamic() {
-                (*rb_a).velocity -= impulse * body_a_inv_mass;
+        if rb_a.is_dynamic() {
+            rb_a.velocity -= impulse * body_a_inv_mass;
+        }
+        if rb_b.is_dynamic() {
+            rb_b.velocity += impulse * body_b_inv_mass;
+        }
+
+        // Surface friction tangent impulse
+        let tangent = rel_vel - contact.normal * vel_along_normal;
+        let tangent_len = tangent.length();
+        if tangent_len > 1e-5 {
+            let tangent_dir = tangent / tangent_len;
+            let jt = -rel_vel.dot(tangent_dir) / w_sum;
+            let friction = (body_a_friction * body_b_friction).sqrt();
+            let clamped_jt = jt.clamp(-j * friction, j * friction);
+            let friction_impulse = tangent_dir * clamped_jt;
+
+            if rb_a.is_dynamic() {
+                rb_a.velocity -= friction_impulse * body_a_inv_mass;
             }
-            if (*rb_b).is_dynamic() {
-                (*rb_b).velocity += impulse * body_b_inv_mass;
-            }
-
-            // Surface friction tangent impulse
-            let tangent = rel_vel - contact.normal * vel_along_normal;
-            let tangent_len = tangent.length();
-            if tangent_len > 1e-5 {
-                let tangent_dir = tangent / tangent_len;
-                let jt = -rel_vel.dot(tangent_dir) / w_sum;
-                let friction = (body_a_friction * body_b_friction).sqrt();
-                let clamped_jt = jt.clamp(-j * friction, j * friction);
-                let friction_impulse = tangent_dir * clamped_jt;
-
-                if (*rb_a).is_dynamic() {
-                    (*rb_a).velocity -= friction_impulse * body_a_inv_mass;
-                }
-                if (*rb_b).is_dynamic() {
-                    (*rb_b).velocity += friction_impulse * body_b_inv_mass;
-                }
+            if rb_b.is_dynamic() {
+                rb_b.velocity += friction_impulse * body_b_inv_mass;
             }
         }
     }

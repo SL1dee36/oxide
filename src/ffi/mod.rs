@@ -221,7 +221,7 @@ impl AppHandler for FfiAppHandler {
     fn on_init(&mut self, ctx: &mut Context) {
         if let Some(f) = self.callbacks.on_init {
             let mut ffi_ctx = OxideContext {
-                ctx: unsafe { std::mem::transmute(ctx) },
+                ctx: (ctx as *mut Context<'_>).cast::<Context<'static>>(),
             };
             f(&mut ffi_ctx, self.callbacks.user_data);
         }
@@ -230,7 +230,7 @@ impl AppHandler for FfiAppHandler {
     fn on_update(&mut self, ctx: &mut Context, dt: f32) {
         if let Some(f) = self.callbacks.on_update {
             let mut ffi_ctx = OxideContext {
-                ctx: unsafe { std::mem::transmute(ctx) },
+                ctx: (ctx as *mut Context<'_>).cast::<Context<'static>>(),
             };
             f(&mut ffi_ctx, dt, self.callbacks.user_data);
         }
@@ -239,7 +239,7 @@ impl AppHandler for FfiAppHandler {
     fn on_render(&mut self, ctx: &mut Context) {
         if let Some(f) = self.callbacks.on_render {
             let mut ffi_ctx = OxideContext {
-                ctx: unsafe { std::mem::transmute(ctx) },
+                ctx: (ctx as *mut Context<'_>).cast::<Context<'static>>(),
             };
             f(&mut ffi_ctx, self.callbacks.user_data);
         }
