@@ -12,7 +12,7 @@ pub use crate::core::{
     Time,
 };
 pub use crate::ecs::{
-    Component, Entity, EntityId, Name, NodeBehavior, Visible, World,
+    Component, Entity, EntityId, Name, NodeBehavior, PendingGpuMeshCleanup, Visible, World,
 };
 pub use crate::math::*;
 pub use crate::physics::{

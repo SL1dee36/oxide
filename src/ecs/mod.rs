@@ -10,7 +10,7 @@ pub mod world;
 pub use components::{Component, Name, NodeBehavior, Transform, Visible};
 pub use entity::{Entity, EntityId};
 pub use systems::{update_behaviors_system, update_hierarchy_system};
-pub use world::World;
+pub use world::{PendingGpuMeshCleanup, World};
 
 /// Backwards-compatibility alias for [`World`].
 pub type Scene = World;

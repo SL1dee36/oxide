@@ -26,11 +26,24 @@ impl Vertex3D {
 }
 
 /// OpenGL Vertex Array Object (VAO) managing vertex attribute bindings.
+#[derive(Debug)]
 pub struct VertexArray {
     id: glow::VertexArray,
 }
 
 impl VertexArray {
+    /// Creates a wrapper around an existing raw OpenGL VAO identifier.
+    pub fn from_raw(id: glow::VertexArray) -> Self {
+        Self { id }
+    }
+
+    /// Creates a dummy VAO for testing without active OpenGL context.
+    pub fn dummy_for_test() -> Self {
+        Self {
+            id: glow::NativeVertexArray(std::num::NonZeroU32::new(1).unwrap()),
+        }
+    }
+
     /// Allocates a new vertex array object in GPU memory.
     pub fn new(gl: &glow::Context) -> Result<Self, OxideError> {
         unsafe {
@@ -66,12 +79,26 @@ impl VertexArray {
 }
 
 /// GPU Vertex Buffer Object (VBO) storing continuous vertex attribute data.
+#[derive(Debug)]
 pub struct VertexBuffer {
     id: glow::Buffer,
     count: usize,
 }
 
 impl VertexBuffer {
+    /// Creates a wrapper around an existing raw OpenGL buffer identifier and vertex count.
+    pub fn from_raw(id: glow::Buffer, count: usize) -> Self {
+        Self { id, count }
+    }
+
+    /// Creates a dummy VBO for testing without active OpenGL context.
+    pub fn dummy_for_test(count: usize) -> Self {
+        Self {
+            id: glow::NativeBuffer(std::num::NonZeroU32::new(1).unwrap()),
+            count,
+        }
+    }
+
     /// Allocates and uploads vertex data into a GPU buffer with `STATIC_DRAW` usage.
     pub fn new<T: Pod + Zeroable>(gl: &glow::Context, data: &[T]) -> Result<Self, OxideError> {
         unsafe {
@@ -165,12 +192,25 @@ impl VertexBuffer {
 }
 
 /// GPU Element Array Buffer (EBO / Index Buffer) storing triangle indices.
+#[derive(Debug)]
 pub struct IndexBuffer {
     id: glow::Buffer,
     count: usize,
 }
 
 impl IndexBuffer {
+    /// Creates a wrapper around an existing raw OpenGL buffer identifier and index count.
+    pub fn from_raw(id: glow::Buffer, count: usize) -> Self {
+        Self { id, count }
+    }
+
+    /// Creates a dummy EBO for testing without active OpenGL context.
+    pub fn dummy_for_test(count: usize) -> Self {
+        Self {
+            id: glow::NativeBuffer(std::num::NonZeroU32::new(1).unwrap()),
+            count,
+        }
+    }
     /// Allocates and uploads index data into a GPU buffer with `STATIC_DRAW` usage.
     pub fn new(gl: &glow::Context, indices: &[u32]) -> Result<Self, OxideError> {
         unsafe {
