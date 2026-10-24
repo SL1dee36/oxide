@@ -312,3 +312,82 @@ fn test_rigid_body_off_center_collision_induces_rotation() {
         rb.angular_velocity
     );
 }
+
+#[test]
+fn test_broadphase_many_bodies_performance_and_accuracy() {
+    let mut world = World::new();
+
+    // Spawn 200 non-intersecting bodies spaced 10.0 units apart along X and Z
+    for i in 0..200 {
+        let x = (i % 20) as f32 * 10.0;
+        let z = (i / 20) as f32 * 10.0;
+        world.spawn_rigid_body(
+            1.0,
+            Transform::from_translation(Vec3::new(x, 0.0, z)),
+            Collider::box_3d(Vec3::ONE),
+        );
+    }
+
+    // Spawn Pair 1: two colliding dynamic boxes at x = 1000.0 and 1000.6 (size 1.0, penetration = 0.4)
+    let b1 = world.spawn_rigid_body(
+        1.0,
+        Transform::from_translation(Vec3::new(1000.0, 0.0, 0.0)),
+        Collider::box_3d(Vec3::ONE),
+    );
+    let b2 = world.spawn_rigid_body(
+        1.0,
+        Transform::from_translation(Vec3::new(1000.6, 0.0, 0.0)),
+        Collider::box_3d(Vec3::ONE),
+    );
+
+    // Spawn Pair 2: dynamic sphere colliding with static box at x = 2000.0 and 2000.7
+    let s1 = world.spawn_rigid_body(
+        1.0,
+        Transform::from_translation(Vec3::new(2000.0, 0.0, 0.0)),
+        Collider::sphere(0.5),
+    );
+    let static_box = world.spawn();
+    world.set_transform(static_box, Transform::from_translation(Vec3::new(2000.7, 0.0, 0.0)));
+    world.collider.insert(static_box, Collider::box_3d(Vec3::ONE));
+    world.rigid_body.insert(static_box, RigidBody::new_static());
+
+    // Direct Broadphase test: out of 204 bodies (20,706 potential pairs), broadphase must find exactly 2 candidate pairs!
+    let mut bp = BroadphaseGrid::new();
+    for (entity, collider) in &world.collider {
+        let is_static = world.rigid_body.get(entity).is_none_or(|rb| !rb.is_dynamic());
+        let mat = world.global_transform_matrix(entity);
+        let aabb = collider.world_aabb(&mat);
+        bp.push(entity, aabb, is_static);
+    }
+    let candidate_pairs = bp.compute_pairs();
+    assert_eq!(
+        candidate_pairs.len(),
+        2,
+        "Broadphase must cull 99.99% of pairs, leaving exactly 2 colliding pairs"
+    );
+
+    // Check physics simulation step performance and contact resolution
+    let start = std::time::Instant::now();
+    world.step_physics(0.016);
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_millis() < 50,
+        "Physics step with 204 bodies must take under 50ms, took {:?}",
+        elapsed
+    );
+
+    // Dynamic boxes b1 and b2 should have bounced/separated
+    let tf1 = world.transform(b1).unwrap();
+    let tf2 = world.transform(b2).unwrap();
+    assert!(
+        tf2.translation.x > tf1.translation.x,
+        "Bodies b1 and b2 must separate properly"
+    );
+
+    // Dynamic sphere s1 should have pushed back from static obstacle
+    let tf_s1 = world.transform(s1).unwrap();
+    assert!(
+        tf_s1.translation.x < 2000.0,
+        "Sphere must be displaced away from static obstacle"
+    );
+}

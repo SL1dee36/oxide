@@ -45,6 +45,30 @@ impl Collider {
             half_extents: size * 0.5,
         }
     }
+
+    /// Computes a conservative world-space 3D AABB enclosing this collider under the given transformation matrix.
+    pub fn world_aabb(&self, matrix: &Mat4) -> Aabb3D {
+        match self {
+            Self::Box3D { half_extents } => {
+                Aabb3D::from_center_half_extents(Vec3::ZERO, *half_extents).transform(matrix)
+            }
+            Self::Sphere { radius } => {
+                let center = matrix.transform_point3(Vec3::ZERO);
+                let (scale, _, _) = matrix.to_scale_rotation_translation();
+                let r_eff = *radius * scale.x.abs().max(scale.y.abs()).max(scale.z.abs());
+                Aabb3D::from_center_half_extents(center, Vec3::splat(r_eff))
+            }
+            Self::Box2D { half_extents } => {
+                let (scale, _, trans) = matrix.to_scale_rotation_translation();
+                let h = Vec3::new(
+                    half_extents.x * scale.x.abs(),
+                    half_extents.y * scale.y.abs(),
+                    0.0,
+                );
+                Aabb3D::from_center_half_extents(trans, h)
+            }
+        }
+    }
 }
 
 /// 3D Axis-Aligned Bounding Box (AABB) defined by minimum and maximum extents.
