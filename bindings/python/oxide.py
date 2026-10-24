@@ -35,6 +35,8 @@ def _find_library():
 _lib_path = _find_library()
 _dll = ctypes.CDLL(_lib_path)
 
+OXIDE_INVALID_NODE_ID = (1 << 64) - 1
+
 # ==========================================
 # C ABI Structs
 # ==========================================
@@ -252,14 +254,14 @@ _dll.oxide_scene_raycast.argtypes = [c_void_p, OxideVec3, OxideVec3, POINTER(Oxi
 _dll.oxide_scene_raycast.restype = c_bool
 
 _dll.oxide_scene_update.argtypes = [c_void_p, c_void_p, c_float]
-_dll.oxide_scene_update.restype = None
+_dll.oxide_scene_update.restype = c_bool
 
 _dll.oxide_scene_render.argtypes = [c_void_p, c_void_p]
-_dll.oxide_scene_render.restype = None
+_dll.oxide_scene_render.restype = c_bool
 
 # Physics Simulation
 _dll.oxide_scene_step_physics.argtypes = [c_void_p, c_float]
-_dll.oxide_scene_step_physics.restype = None
+_dll.oxide_scene_step_physics.restype = c_bool
 
 _dll.oxide_scene_spawn_rigid_body_box.argtypes = [c_void_p, OxideVec3, OxideTransform, c_float, c_float, c_float, c_bool]
 _dll.oxide_scene_spawn_rigid_body_box.restype = c_uint64
@@ -621,36 +623,57 @@ class Scene:
         amb = ambient or Vec3(0.25, 0.25, 0.28)
         _dll.oxide_scene_set_light(self._ptr, direction._to_c(), col._to_c(), amb._to_c())
 
+    @staticmethod
+    def is_valid_node(node_id: int) -> bool:
+        return node_id is not None and int(node_id) != OXIDE_INVALID_NODE_ID
+
     def spawn_cube_3d(self, size, transform=None, color=None):
         t = transform or Transform()
         if color is not None:
-            return _dll.oxide_scene_spawn_cube_3d_colored(self._ptr, float(size), color._to_c(), t._to_c())
-        return _dll.oxide_scene_spawn_cube_3d(self._ptr, float(size), t._to_c())
+            node_id = _dll.oxide_scene_spawn_cube_3d_colored(self._ptr, float(size), color._to_c(), t._to_c())
+        else:
+            node_id = _dll.oxide_scene_spawn_cube_3d(self._ptr, float(size), t._to_c())
+        if node_id == OXIDE_INVALID_NODE_ID:
+            raise RuntimeError("oxide_scene_spawn_cube_3d returned OXIDE_INVALID_NODE_ID")
+        return node_id
 
     def spawn_sphere_3d(self, radius, transform=None, color=None):
         t = transform or Transform()
         if color is not None:
-            return _dll.oxide_scene_spawn_sphere_3d_colored(self._ptr, float(radius), color._to_c(), t._to_c())
-        return _dll.oxide_scene_spawn_sphere_3d(self._ptr, float(radius), t._to_c())
+            node_id = _dll.oxide_scene_spawn_sphere_3d_colored(self._ptr, float(radius), color._to_c(), t._to_c())
+        else:
+            node_id = _dll.oxide_scene_spawn_sphere_3d(self._ptr, float(radius), t._to_c())
+        if node_id == OXIDE_INVALID_NODE_ID:
+            raise RuntimeError("oxide_scene_spawn_sphere_3d returned OXIDE_INVALID_NODE_ID")
+        return node_id
 
     def spawn_box_3d(self, width, height, depth, transform=None, color=None, is_static=False):
         t = transform or Transform()
         c = color or Color(1.0, 1.0, 1.0, 1.0)
-        return _dll.oxide_scene_spawn_box_3d(
+        node_id = _dll.oxide_scene_spawn_box_3d(
             self._ptr, float(width), float(height), float(depth), c._to_c(), t._to_c(), bool(is_static)
         )
+        if node_id == OXIDE_INVALID_NODE_ID:
+            raise RuntimeError("oxide_scene_spawn_box_3d returned OXIDE_INVALID_NODE_ID")
+        return node_id
 
     def spawn_surface_2d(self, size, color=None, transform=None):
         c = color or Color()
         t = transform or Transform()
-        return _dll.oxide_scene_spawn_surface_2d(self._ptr, size._to_c(), c._to_c(), t._to_c())
+        node_id = _dll.oxide_scene_spawn_surface_2d(self._ptr, size._to_c(), c._to_c(), t._to_c())
+        if node_id == OXIDE_INVALID_NODE_ID:
+            raise RuntimeError("oxide_scene_spawn_surface_2d returned OXIDE_INVALID_NODE_ID")
+        return node_id
 
     def spawn_text_2d(self, text, color=None, scale=1.0, transform=None):
         c = color or Color()
         t = transform or Transform()
-        return _dll.oxide_scene_spawn_text_2d(
+        node_id = _dll.oxide_scene_spawn_text_2d(
             self._ptr, text.encode("utf-8"), c._to_c(), float(scale), t._to_c()
         )
+        if node_id == OXIDE_INVALID_NODE_ID:
+            raise RuntimeError("oxide_scene_spawn_text_2d returned OXIDE_INVALID_NODE_ID")
+        return node_id
 
     def node_set_text(self, node_id, text):
         if node_id is not None:
@@ -726,23 +749,29 @@ class Scene:
             )
         return None
 
-    def update(self, ctx, dt):
-        _dll.oxide_scene_update(self._ptr, ctx._ptr, float(dt))
+    def update(self, ctx, dt) -> bool:
+        return bool(_dll.oxide_scene_update(self._ptr, ctx._ptr, float(dt)))
 
-    def render(self, ctx):
-        _dll.oxide_scene_render(self._ptr, ctx._ptr)
+    def render(self, ctx) -> bool:
+        return bool(_dll.oxide_scene_render(self._ptr, ctx._ptr))
 
-    def step_physics(self, dt: float):
+    def step_physics(self, dt: float) -> bool:
         """Advances rigid body and soft body physics simulation by dt seconds."""
-        _dll.oxide_scene_step_physics(self._ptr, float(dt))
+        return bool(_dll.oxide_scene_step_physics(self._ptr, float(dt)))
 
     def spawn_rigid_body_box(self, size: Vec3, transform: Transform = None, mass: float = 1.0, restitution: float = 0.2, friction: float = 0.5, is_static: bool = False) -> int:
         tf = transform._to_c() if transform else Transform()._to_c()
-        return _dll.oxide_scene_spawn_rigid_body_box(self._ptr, size._to_c(), tf, float(mass), float(restitution), float(friction), bool(is_static))
+        node_id = _dll.oxide_scene_spawn_rigid_body_box(self._ptr, size._to_c(), tf, float(mass), float(restitution), float(friction), bool(is_static))
+        if node_id == OXIDE_INVALID_NODE_ID:
+            raise RuntimeError("oxide_scene_spawn_rigid_body_box returned OXIDE_INVALID_NODE_ID")
+        return node_id
 
     def spawn_rigid_body_sphere(self, radius: float, transform: Transform = None, mass: float = 1.0, restitution: float = 0.2, friction: float = 0.5, is_static: bool = False) -> int:
         tf = transform._to_c() if transform else Transform()._to_c()
-        return _dll.oxide_scene_spawn_rigid_body_sphere(self._ptr, float(radius), tf, float(mass), float(restitution), float(friction), bool(is_static))
+        node_id = _dll.oxide_scene_spawn_rigid_body_sphere(self._ptr, float(radius), tf, float(mass), float(restitution), float(friction), bool(is_static))
+        if node_id == OXIDE_INVALID_NODE_ID:
+            raise RuntimeError("oxide_scene_spawn_rigid_body_sphere returned OXIDE_INVALID_NODE_ID")
+        return node_id
 
     def add_rigid_body(self, node_id: int, mass: float = 1.0, restitution: float = 0.2, friction: float = 0.5, body_type: int = 0) -> bool:
         return _dll.oxide_scene_add_rigid_body(self._ptr, int(node_id), float(mass), float(restitution), float(friction), int(body_type))
@@ -780,9 +809,22 @@ class Scene:
             return out.value
         return 0.0
 
+    # RigidBody aliases matching C ABI naming conventions
+    rigid_body_set_velocity = set_velocity
+    rigid_body_get_velocity = get_velocity
+    rigid_body_set_angular_velocity = set_angular_velocity
+    rigid_body_get_angular_velocity = get_angular_velocity
+    rigid_body_apply_force = apply_force
+    rigid_body_apply_torque = apply_torque
+    rigid_body_apply_impulse = apply_impulse
+    rigid_body_get_mass = get_mass
+
     def spawn_soft_body_cloth(self, width: float, height: float, segments_x: int, segments_y: int, total_mass: float, stiffness: float, transform: Transform = None) -> int:
         tf = transform._to_c() if transform else Transform()._to_c()
-        return _dll.oxide_scene_spawn_soft_body_cloth(self._ptr, float(width), float(height), int(segments_x), int(segments_y), float(total_mass), float(stiffness), tf)
+        node_id = _dll.oxide_scene_spawn_soft_body_cloth(self._ptr, float(width), float(height), int(segments_x), int(segments_y), float(total_mass), float(stiffness), tf)
+        if node_id == OXIDE_INVALID_NODE_ID:
+            raise RuntimeError("oxide_scene_spawn_soft_body_cloth returned OXIDE_INVALID_NODE_ID")
+        return node_id
 
     def set_particle_fixed(self, node_id: int, particle_idx: int, fixed: bool) -> bool:
         """Marks or unmarks a soft body particle as pinned/immovable."""
