@@ -319,7 +319,7 @@ impl World {
         if let Some(rb) = self.rigid_body.get(entity) {
             rb.is_static()
         } else {
-            false
+            self.collider.contains_key(entity)
         }
     }
 
@@ -520,10 +520,20 @@ impl World {
         transform: Transform,
         collider: Collider,
     ) -> EntityId {
+        let mut rb = RigidBody::new_dynamic(mass);
+        match collider {
+            Collider::Sphere { radius } => {
+                rb = rb.with_sphere_inertia(radius);
+            }
+            Collider::Box3D { half_extents } => {
+                rb = rb.with_box_inertia(half_extents * 2.0);
+            }
+            Collider::Box2D { .. } => {}
+        }
         let entity = self.spawn();
         self.set_transform(entity, transform);
         self.collider.insert(entity, collider);
-        self.rigid_body.insert(entity, RigidBody::new_dynamic(mass));
+        self.rigid_body.insert(entity, rb);
         entity
     }
 
@@ -533,8 +543,19 @@ impl World {
         mesh: Mesh3D,
         transform: Transform,
         collider: Collider,
-        rigid_body: RigidBody,
+        mut rigid_body: RigidBody,
     ) -> EntityId {
+        if rigid_body.is_dynamic() {
+            match collider {
+                Collider::Sphere { radius } => {
+                    rigid_body = rigid_body.with_sphere_inertia(radius);
+                }
+                Collider::Box3D { half_extents } => {
+                    rigid_body = rigid_body.with_box_inertia(half_extents * 2.0);
+                }
+                Collider::Box2D { .. } => {}
+            }
+        }
         let entity = self.spawn();
         self.set_transform(entity, transform);
         self.mesh_3d.insert(entity, mesh);
