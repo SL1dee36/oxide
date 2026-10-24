@@ -68,3 +68,56 @@ fn test_ffi_app_allocation_and_destruction() {
         oxide_app_destroy(app);
     }
 }
+
+#[test]
+fn test_ffi_error_handling_and_boundary_safety() {
+    unsafe {
+        assert_eq!(OXIDE_INVALID_NODE_ID, u64::MAX);
+
+        let t = OxideTransform {
+            translation: OxideVec3 { x: 0.0, y: 0.0, z: 0.0 },
+            rotation: OxideQuat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 },
+            scale: OxideVec3 { x: 1.0, y: 1.0, z: 1.0 },
+        };
+
+        // All spawn functions on null scene must return OXIDE_INVALID_NODE_ID
+        assert_eq!(oxide_scene_spawn_cube_3d(std::ptr::null_mut(), 1.0, t), OXIDE_INVALID_NODE_ID);
+        assert_eq!(oxide_scene_spawn_sphere_3d(std::ptr::null_mut(), 1.0, t), OXIDE_INVALID_NODE_ID);
+        assert_eq!(oxide_scene_spawn_rigid_body_box(
+            std::ptr::null_mut(),
+            OxideVec3 { x: 1.0, y: 1.0, z: 1.0 },
+            t,
+            1.0, 0.5, 0.5, false
+        ), OXIDE_INVALID_NODE_ID);
+        assert_eq!(oxide_scene_spawn_rigid_body_sphere(
+            std::ptr::null_mut(),
+            1.0,
+            t,
+            1.0, 0.5, 0.5, false
+        ), OXIDE_INVALID_NODE_ID);
+        assert_eq!(oxide_scene_spawn_soft_body_cloth(
+            std::ptr::null_mut(),
+            1.0, 1.0, 2, 2, 1.0, 0.5, t
+        ), OXIDE_INVALID_NODE_ID);
+
+        // Critical entry points must return false/-1 on null pointers safely
+        assert!(!oxide_scene_step_physics(std::ptr::null_mut(), 0.016));
+        assert!(!oxide_scene_update(std::ptr::null_mut(), std::ptr::null_mut(), 0.016));
+        assert!(!oxide_scene_render(std::ptr::null_mut(), std::ptr::null_mut()));
+        assert!(!oxide_scene_raycast(
+            std::ptr::null_mut(),
+            OxideVec3 { x: 0.0, y: 0.0, z: 0.0 },
+            OxideVec3 { x: 0.0, y: 0.0, z: 1.0 },
+            std::ptr::null_mut()
+        ));
+
+        let callbacks = OxideCallbacks {
+            on_init: None,
+            on_update: None,
+            on_render: None,
+            user_data: std::ptr::null_mut(),
+        };
+        assert_eq!(oxide_app_run(std::ptr::null_mut(), callbacks), -1);
+    }
+}
+

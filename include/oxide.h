@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define OXIDE_INVALID_NODE_ID UINT64_MAX
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -144,11 +146,11 @@ void oxide_scene_resolve_penetration(OxideScene* scene, uint64_t node_a, uint64_
 bool oxide_scene_raycast(OxideScene* scene, OxideVec3 origin, OxideVec3 direction, OxideRaycastHit* out_hit);
 
 // Scene Lifecycle
-void oxide_scene_update(OxideScene* scene, OxideContext* ctx, float dt);
-void oxide_scene_render(OxideScene* scene, OxideContext* ctx);
+bool oxide_scene_update(OxideScene* scene, OxideContext* ctx, float dt);
+bool oxide_scene_render(OxideScene* scene, OxideContext* ctx);
 
 // Physics Simulation
-void oxide_scene_step_physics(OxideScene* scene, float dt);
+bool oxide_scene_step_physics(OxideScene* scene, float dt);
 uint64_t oxide_scene_spawn_rigid_body_box(OxideScene* scene, OxideVec3 size, OxideTransform transform, float mass, float restitution, float friction, bool is_static);
 uint64_t oxide_scene_spawn_rigid_body_sphere(OxideScene* scene, float radius, OxideTransform transform, float mass, float restitution, float friction, bool is_static);
 bool oxide_scene_add_rigid_body(OxideScene* scene, uint64_t node_id, float mass, float restitution, float friction, uint32_t body_type);

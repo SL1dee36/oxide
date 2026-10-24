@@ -6,6 +6,7 @@ style = "type"
 
 [export]
 include = [
+    "OXIDE_INVALID_NODE_ID",
     "OxideVec2",
     "OxideVec3",
     "OxideQuat",
